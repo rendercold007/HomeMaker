@@ -1,0 +1,48 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "HomeMaker" [level=1] [ref=e5]
+    - generic [ref=e6]: Phase 1 · 2D editor
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - button "Select" [ref=e9] [cursor=pointer]
+      - button "Wall" [ref=e10] [cursor=pointer]
+    - generic [ref=e12]:
+      - button "Undo" [disabled] [ref=e13]
+      - button "Redo" [disabled] [ref=e14]
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - checkbox "Grid" [checked] [ref=e18]
+        - text: Grid
+      - generic [ref=e19]:
+        - checkbox "Snap" [checked] [ref=e20]
+        - text: Snap
+      - generic [ref=e21]:
+        - text: Size
+        - combobox "Size" [ref=e22]:
+          - option "15 cm"
+          - option "30 cm" [selected]
+          - option "50 cm"
+          - option "100 cm"
+  - generic [ref=e23]:
+    - main [ref=e24]:
+      - generic [ref=e25]:
+        - generic: 35% · grid 30cm
+    - complementary [ref=e28]:
+      - generic [ref=e29]:
+        - heading "Plan" [level=2] [ref=e30]
+        - generic [ref=e31]:
+          - generic [ref=e32]:
+            - term [ref=e33]: Points
+            - definition [ref=e34]: "0"
+          - generic [ref=e35]:
+            - term [ref=e36]: Walls
+            - definition [ref=e37]: "0"
+          - generic [ref=e38]:
+            - term [ref=e39]: Rooms
+            - definition [ref=e40]: "0"
+      - generic [ref=e41]:
+        - heading "Rooms" [level=2] [ref=e42]
+        - paragraph [ref=e43]: None yet — draw a closed loop of walls.
+      - generic [ref=e44]:
+        - heading "Selection" [level=2] [ref=e45]
+        - paragraph [ref=e46]: Nothing selected.
