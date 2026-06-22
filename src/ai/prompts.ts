@@ -91,6 +91,62 @@ Note: in the example rooms share edges (Living Room right edge x=350 = Bedroom l
 
 Now generate a complete layout for the user's requirements.`;
 
+export function buildAssistPrompt(params: {
+  plan: import('../model/types').Plan;
+  message: string;
+}): string {
+  const { plan, message } = params;
+  const { plot, vastu, floors } = plan;
+  const { widthCm, depthCm, entrance, setbacks } = plot;
+  const { front: f, rear: r, left: l, right: rt } = setbacks;
+
+  let xMin: number, xMax: number, yMin: number, yMax: number;
+  switch (entrance) {
+    case 'N': xMin = l; xMax = widthCm - rt; yMin = f; yMax = depthCm - r; break;
+    case 'S': xMin = rt; xMax = widthCm - l; yMin = r; yMax = depthCm - f; break;
+    case 'E': xMin = r; xMax = widthCm - f; yMin = l; yMax = depthCm - rt; break;
+    case 'W': xMin = f; xMax = widthCm - r; yMin = rt; yMax = depthCm - l; break;
+  }
+
+  const floor = floors[0];
+  const pointById = new Map((floor?.points ?? []).map((p) => [p.id, p]));
+  const wallById  = new Map((floor?.walls ?? []).map((w) => [w.id, w]));
+
+  // Describe each detected room as an approximate bounding box.
+  const roomLines = (floor?.rooms ?? []).map((room) => {
+    const pts = new Set<string>();
+    for (const wid of room.wallIds) {
+      const w = wallById.get(wid);
+      if (w) { pts.add(w.a); pts.add(w.b); }
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const pid of pts) {
+      const p = pointById.get(pid);
+      if (p) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
+    }
+    if (!isFinite(minX)) return null;
+    const w = Math.round(maxX - minX), h = Math.round(maxY - minY);
+    return `  { "name": "${room.name}", "x": ${Math.round(minX)}, "y": ${Math.round(minY)}, "w": ${w}, "h": ${h} }`;
+  }).filter(Boolean);
+
+  return `PLOT:
+  Size: ${widthCm} × ${depthCm} cm, entrance: ${entrance}
+  Buildable zone: x ∈ [${xMin!}, ${xMax!}], y ∈ [${yMin!}, ${yMax!}]
+  Plot centre: (${widthCm / 2}, ${depthCm / 2})
+
+VASTU MODE: ${vastu.mode}
+
+CURRENT LAYOUT (approximate room bounding boxes):
+${roomLines.length ? roomLines.join('\n') : '  (no rooms yet)'}
+
+USER REQUEST:
+${message}
+
+Respond with the complete modified layout as JSON in the same format as usual.
+Keep rooms that the user did not ask to change. Honour Vastu placement rules.
+All rooms must fit in the buildable zone. No overlaps.`;
+}
+
 export function buildUserPrompt(params: {
   prompt: string;
   plot: Plot;

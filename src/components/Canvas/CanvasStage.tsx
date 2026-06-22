@@ -42,6 +42,7 @@ import { useTool } from '../../state/ToolContext';
 import { useSelection } from '../../state/SelectionContext';
 
 import { useElementSize } from './useElementSize';
+import { setStageRef } from '../../lib/stageRef';
 import { snapWorldPoint, type SnapCandidate } from './snapping';
 import { GridLayer } from './GridLayer';
 import { RoomsLayer } from './RoomsLayer';
@@ -393,6 +394,7 @@ export function CanvasStage() {
         <Stage
           width={size.width}
           height={size.height}
+          ref={(node) => setStageRef(node)}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}

@@ -1,133 +1,101 @@
-/**
- * VastuPanel — Vastu compliance report and BBMP bye-law summary.
- *
- * Runs the pure rules engines on the current plan and displays violations.
- * Also lets the user toggle the Vastu mode (strict / loose / off).
- */
 import { useMemo } from 'react';
 import { usePlan } from '../../state/PlanContext';
-import { checkVastu, type VastuViolation } from '../../model/vastu';
-import { checkByelaws, type ByelawViolation } from '../../model/byelaws';
+import { checkVastu } from '../../model/vastu';
+import { checkByelaws } from '../../model/byelaws';
 import type { VastuConfig } from '../../model/types';
 
-function ScoreBadge({ score }: { score: number }) {
-  const color =
-    score >= 80 ? 'bg-green-100 text-green-700' :
-    score >= 50 ? 'bg-amber-100 text-amber-700' :
-                  'bg-red-100 text-red-700';
+function ScoreRing({ score }: { score: number }) {
+  const color = score >= 80 ? '#34d399' : score >= 50 ? '#fbbf24' : '#f87171';
+  const r = 18, circ = 2 * Math.PI * r;
+  const dash = (score / 100) * circ;
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${color}`}>
-      {score}
-    </span>
-  );
-}
-
-function ViolationRow({ v }: { v: VastuViolation | ByelawViolation }) {
-  const isError = v.severity === 'error';
-  return (
-    <li className="flex items-start gap-1.5 rounded bg-white px-2 py-1.5">
-      <span className={`mt-px shrink-0 text-xs ${isError ? 'text-red-500' : 'text-amber-500'}`}>
-        {isError ? '✗' : '⚠'}
-      </span>
-      <span className="text-slate-600">{v.message}</span>
-    </li>
+    <div className="relative flex h-12 w-12 items-center justify-center">
+      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 44 44">
+        <circle cx="22" cy="22" r={r} fill="none" stroke="#1e293b" strokeWidth="4" />
+        <circle cx="22" cy="22" r={r} fill="none" stroke={color} strokeWidth="4"
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{ transition: 'stroke-dasharray 0.5s ease' }} />
+      </svg>
+      <span className="text-sm font-bold" style={{ color }}>{score}</span>
+    </div>
   );
 }
 
 const MODES: VastuConfig['mode'][] = ['strict', 'loose', 'off'];
-const MODE_LABELS: Record<VastuConfig['mode'], string> = {
-  strict: 'Strict',
-  loose: 'Loose',
-  off: 'Off',
-};
 
 export function VastuPanel() {
   const { plan, commit } = usePlan();
-
-  const vastuReport = useMemo(() => checkVastu(plan), [plan]);
-  const byelawReport = useMemo(() => checkByelaws(plan), [plan]);
+  const vastuReport  = useMemo(() => checkVastu(plan),    [plan]);
+  const byelawReport = useMemo(() => checkByelaws(plan),  [plan]);
 
   function setMode(mode: VastuConfig['mode']) {
     commit((p) => ({ ...p, vastu: { mode } }));
   }
 
-  const currentMode = plan.vastu.mode;
+  const mode = plan.vastu.mode;
+  const violations = [...vastuReport.violations, ...byelawReport.violations];
 
   return (
-    <aside className="flex w-56 flex-none flex-col gap-3 overflow-y-auto border-l border-slate-200 bg-white p-3 text-sm">
-      {/* Header + mode toggle */}
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="font-semibold text-slate-700">Vastu</h2>
-          {currentMode !== 'off' && <ScoreBadge score={vastuReport.score} />}
+    <aside className="flex-none border-t border-white/5 p-3 space-y-3">
+      {/* Vastu header */}
+      <div className="flex items-center gap-3">
+        {mode !== 'off' && <ScoreRing score={vastuReport.score} />}
+        <div className="flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">Vastu</p>
+          {mode !== 'off' && (
+            <p className="text-xs text-slate-400 mt-0.5">
+              {vastuReport.violations.length === 0 ? '✓ All rooms comply' : `${vastuReport.violations.length} violation${vastuReport.violations.length > 1 ? 's' : ''}`}
+            </p>
+          )}
         </div>
-        <div className="flex gap-1">
-          {MODES.map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`flex-1 rounded border px-1 py-0.5 text-xs transition-colors ${
-                currentMode === m
-                  ? 'border-blue-500 bg-blue-600 text-white'
-                  : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {MODE_LABELS[m]}
-            </button>
+      </div>
+
+      {/* Mode toggle */}
+      <div className="flex rounded-lg border border-white/5 bg-white/3 p-0.5" style={{ background: 'rgba(255,255,255,0.03)' }}>
+        {MODES.map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`flex-1 rounded-md py-1 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+              mode === m
+                ? 'bg-amber-500 text-slate-900 shadow'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {/* Violations */}
+      {violations.length > 0 && (
+        <ul className="space-y-1 max-h-32 overflow-y-auto">
+          {violations.map((v, i) => (
+            <li key={i} className={`flex items-start gap-1.5 rounded-lg px-2 py-1.5 text-[10px] leading-snug ${
+              v.severity === 'error' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
+            }`}>
+              <span className="flex-none font-bold">{v.severity === 'error' ? '✗' : '!'}</span>
+              <span>{v.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* BBMP summary */}
+      <div>
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-600">BBMP Bye-laws</p>
+        <div className="space-y-1">
+          {[
+            { label: 'Coverage', value: `${byelawReport.groundCoveragePercent.toFixed(1)}%`, ok: byelawReport.violations.every(v => !v.message.includes('coverage')) },
+            { label: 'FAR',      value: byelawReport.far.toFixed(2),                              ok: byelawReport.violations.every(v => !v.message.includes('FAR')) },
+            { label: 'Setbacks', value: byelawReport.setbackViolatingPoints.length === 0 ? 'OK' : 'Fail', ok: byelawReport.setbackViolatingPoints.length === 0 },
+          ].map(({ label, value, ok }) => (
+            <div key={label} className="flex items-center justify-between rounded-lg px-2.5 py-1" style={{ background: 'rgba(255,255,255,0.04)' }}>
+              <span className="text-xs text-slate-500">{label}</span>
+              <span className={`text-xs font-semibold ${ok ? 'text-emerald-400' : 'text-red-400'}`}>{value}</span>
+            </div>
           ))}
         </div>
-      </section>
-
-      {/* Vastu violations */}
-      <section>
-        {currentMode === 'off' ? (
-          <p className="text-xs text-slate-400">Vastu checks disabled.</p>
-        ) : vastuReport.violations.length === 0 ? (
-          <p className="text-xs text-slate-400">
-            {vastuReport.checkedRooms === 0
-              ? 'Name rooms to check Vastu placement.'
-              : 'All rooms comply.'}
-          </p>
-        ) : (
-          <ul className="space-y-1 text-xs">
-            {vastuReport.violations.map((v) => (
-              <ViolationRow key={v.id} v={v} />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <div className="border-t border-slate-200" />
-
-      {/* BBMP bye-laws */}
-      <section>
-        <h2 className="mb-2 font-semibold text-slate-700">BBMP Bye-laws</h2>
-        <dl className="mb-2 space-y-0.5 text-xs text-slate-600">
-          <div className="flex justify-between">
-            <dt>Ground coverage</dt>
-            <dd>{byelawReport.groundCoveragePercent.toFixed(1)}%</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt>FAR</dt>
-            <dd>{byelawReport.far.toFixed(2)}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt>Setback pts</dt>
-            <dd className={byelawReport.setbackViolatingPoints.length > 0 ? 'text-red-500' : ''}>
-              {byelawReport.setbackViolatingPoints.length > 0
-                ? `${byelawReport.setbackViolatingPoints.length} issue${byelawReport.setbackViolatingPoints.length > 1 ? 's' : ''}`
-                : 'OK'}
-            </dd>
-          </div>
-        </dl>
-        {byelawReport.violations.length > 0 && (
-          <ul className="space-y-1 text-xs">
-            {byelawReport.violations.map((v) => (
-              <ViolationRow key={v.id} v={v} />
-            ))}
-          </ul>
-        )}
-      </section>
+      </div>
     </aside>
   );
 }
