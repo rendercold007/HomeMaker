@@ -10,6 +10,13 @@ import {
   screenLengthToWorld,
   panBy,
   zoomAt,
+  distance,
+  distanceSq,
+  snapToGrid,
+  snapToNearestPoint,
+  applyAngleLock,
+  distanceToSegment,
+  signedPolygonArea,
   type Viewport,
   type Vec2,
 } from './geometry';
@@ -126,5 +133,124 @@ describe('zoomAt', () => {
     const vp: Viewport = { pan: { x: 0, y: 0 }, zoom: 1 };
     zoomAt(vp, { x: 10, y: 10 }, 5);
     expect(vp).toEqual({ pan: { x: 0, y: 0 }, zoom: 1 });
+  });
+});
+
+describe('distance', () => {
+  it('computes Euclidean distance', () => {
+    expect(distance({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
+  });
+  it('distanceSq is distance squared', () => {
+    expect(distanceSq({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(25);
+  });
+});
+
+describe('snapToGrid', () => {
+  it('rounds to the nearest grid multiple', () => {
+    expect(snapToGrid({ x: 47, y: 63 }, 10)).toEqual({ x: 50, y: 60 });
+  });
+  it('rounds away from .5 boundaries consistently', () => {
+    expect(snapToGrid({ x: 25, y: -25 }, 10)).toEqual({ x: 30, y: -20 });
+  });
+  it('returns the point unchanged for non-positive grid', () => {
+    expect(snapToGrid({ x: 47, y: 63 }, 0)).toEqual({ x: 47, y: 63 });
+  });
+});
+
+describe('snapToNearestPoint', () => {
+  const candidates: Vec2[] = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+  ];
+
+  it('snaps to a candidate within threshold', () => {
+    const r = snapToNearestPoint({ x: 103, y: 2 }, candidates, 10);
+    expect(r.index).toBe(1);
+    expect(r.point).toEqual({ x: 100, y: 0 });
+  });
+
+  it('returns the original point with index -1 when nothing is close', () => {
+    const r = snapToNearestPoint({ x: 50, y: 50 }, candidates, 10);
+    expect(r.index).toBe(-1);
+    expect(r.point).toEqual({ x: 50, y: 50 });
+  });
+
+  it('picks the nearest when several are within threshold', () => {
+    const r = snapToNearestPoint({ x: 96, y: 96 }, candidates, 100);
+    expect(r.index).toBe(2);
+  });
+
+  it('handles an empty candidate list', () => {
+    expect(snapToNearestPoint({ x: 1, y: 1 }, [], 10).index).toBe(-1);
+  });
+});
+
+describe('applyAngleLock', () => {
+  const origin: Vec2 = { x: 0, y: 0 };
+
+  it('snaps a near-horizontal target to exactly horizontal, preserving length', () => {
+    const r = applyAngleLock(origin, { x: 100, y: 7 }, 45);
+    expect(r.x).toBeCloseTo(Math.hypot(100, 7));
+    expect(r.y).toBeCloseTo(0);
+  });
+
+  it('snaps a near-45° target to exactly 45°', () => {
+    const r = applyAngleLock(origin, { x: 100, y: 90 }, 45);
+    expect(r.x).toBeCloseTo(r.y); // 45° → equal components
+  });
+
+  it('snaps to vertical', () => {
+    const r = applyAngleLock(origin, { x: 5, y: 100 }, 90);
+    expect(r.x).toBeCloseTo(0);
+    expect(r.y).toBeCloseTo(Math.hypot(5, 100));
+  });
+
+  it('returns target unchanged for zero-length segment', () => {
+    expect(applyAngleLock(origin, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('distanceToSegment', () => {
+  const a: Vec2 = { x: 0, y: 0 };
+  const b: Vec2 = { x: 100, y: 0 };
+
+  it('finds the perpendicular foot for a point above the middle', () => {
+    const r = distanceToSegment({ x: 50, y: 20 }, a, b);
+    expect(r.distance).toBeCloseTo(20);
+    expect(r.closest).toEqual({ x: 50, y: 0 });
+  });
+
+  it('clamps to endpoint a when the projection falls before the segment', () => {
+    const r = distanceToSegment({ x: -30, y: 0 }, a, b);
+    expect(r.distance).toBeCloseTo(30);
+    expect(r.closest).toEqual({ x: 0, y: 0 });
+  });
+
+  it('clamps to endpoint b when the projection falls after the segment', () => {
+    const r = distanceToSegment({ x: 130, y: 0 }, a, b);
+    expect(r.closest).toEqual({ x: 100, y: 0 });
+  });
+
+  it('handles a degenerate (zero-length) segment', () => {
+    const r = distanceToSegment({ x: 3, y: 4 }, a, a);
+    expect(r.distance).toBe(5);
+  });
+});
+
+describe('signedPolygonArea', () => {
+  const square: Vec2[] = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ];
+
+  it('is positive for a clockwise polygon in screen (y-down) coords', () => {
+    expect(signedPolygonArea(square)).toBe(10000);
+  });
+
+  it('flips sign when winding is reversed', () => {
+    expect(signedPolygonArea([...square].reverse())).toBe(-10000);
   });
 });
