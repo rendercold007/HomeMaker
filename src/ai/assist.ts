@@ -10,8 +10,12 @@ export async function assistPlan(plan: Plan, message: string): Promise<Plan> {
   });
 
   let json: unknown;
-  try { json = await res.json(); }
-  catch { throw new Error('Server returned non-JSON response.'); }
+  try {
+    json = await res.json();
+  } catch {
+    const text = await res.text().catch(() => '(unreadable)');
+    throw new Error(`Server error ${res.status}: ${text.slice(0, 200)}`);
+  }
 
   if (!res.ok) {
     throw new Error((json as { error?: string })?.error ?? `HTTP ${res.status}`);
