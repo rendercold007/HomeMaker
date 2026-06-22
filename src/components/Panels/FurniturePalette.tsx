@@ -21,7 +21,7 @@ export function FurniturePalette() {
   }
 
   return (
-    <aside className="flex h-full w-44 flex-col gap-2 overflow-y-auto border-r border-slate-200 bg-slate-50 p-2 text-sm">
+    <aside className="flex h-full w-44 flex-col gap-2 overflow-y-auto bg-slate-50 p-2 text-sm">
       <h2 className="font-semibold text-slate-700">Furniture</h2>
 
       {tool === 'furniture' && activeFurnitureType && (

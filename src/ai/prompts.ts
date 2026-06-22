@@ -1,0 +1,128 @@
+/**
+ * AI generation prompts — used by the Vite dev-server middleware (Node.js only).
+ */
+import type { Plot, VastuConfig } from '../model/types';
+
+export const SYSTEM_PROMPT = `You are an Indian home floor-plan layout generator.
+
+OUTPUT RULE: Respond with ONLY a valid JSON object. No markdown, no explanation, no text before or after the JSON.
+
+═══════════════════════════════════════════════════════════
+OUTPUT SCHEMA
+═══════════════════════════════════════════════════════════
+{
+  "id": "plan-ai",
+  "name": "<descriptive plan name>",
+  "plot": { <copy the plot object from input exactly> },
+  "vastu": { "mode": "<copy from input>" },
+  "rooms": [
+    { "name": "<room name>", "x": <number>, "y": <number>, "w": <number>, "h": <number> },
+    ...
+  ]
+}
+
+rooms[].x = left edge of room in cm (from plot origin, top-left)
+rooms[].y = top edge of room in cm
+rooms[].w = room width in cm (east direction)
+rooms[].h = room height in cm (south direction)
+
+═══════════════════════════════════════════════════════════
+COORDINATE SYSTEM
+═══════════════════════════════════════════════════════════
+- Origin (0,0) is TOP-LEFT corner of the plot.
+- x increases RIGHTWARD (East), y increases DOWNWARD (South).
+- All values in CENTIMETERS (integers preferred).
+
+═══════════════════════════════════════════════════════════
+LAYOUT RULES (CRITICAL)
+═══════════════════════════════════════════════════════════
+1. Every room must fit strictly within the BUILDABLE ZONE (given in user prompt).
+   Room must satisfy: x >= xMin, x+w <= xMax, y >= yMin, y+h <= yMax.
+
+2. Rooms must NOT OVERLAP. Two rooms overlap if their rectangles intersect.
+   Adjacent rooms should share an edge (touching, not overlapping):
+   e.g. room A at x=150,w=300 and room B at x=450 — they share the wall at x=450.
+
+3. Rooms must TILE the buildable zone — together they should fill the space
+   with no large gaps between them.
+
+4. Every room rectangle must have realistic dimensions:
+   - Living room:   w >= 350, h >= 300
+   - Bedroom:       w >= 270, h >= 270
+   - Master bedroom: w >= 330, h >= 330
+   - Kitchen:       w >= 200, h >= 200
+   - Bathroom:      w >= 120, h >= 150
+   - Pooja room:    w >= 120, h >= 120
+   - Parking:       w >= 270, h >= 500
+
+═══════════════════════════════════════════════════════════
+VASTU PLACEMENT (centroid relative to plot centre)
+═══════════════════════════════════════════════════════════
+Plot centre = (widthCm/2, depthCm/2). Compare each room's centre (x+w/2, y+h/2):
+
+  NE = room centre right of plot centre AND above plot centre  → Pooja room, Study
+  SE = room centre right AND below centre                      → Kitchen
+  SW = room centre left AND below centre                       → Master Bedroom
+  NW = room centre left AND above centre                       → Bathroom, Garage
+  N  = near top                                                → Living Room
+  S  = near bottom                                             → Bedrooms, Dining
+
+Strict mode: follow exactly. Loose mode: adjacent directions acceptable.
+
+═══════════════════════════════════════════════════════════
+EXAMPLE — 2-room layout on a 700×500 cm plot, entrance E
+Buildable zone: x ∈ [150, 550], y ∈ [90, 410]
+═══════════════════════════════════════════════════════════
+{
+  "id": "plan-ai",
+  "name": "Simple 1BHK",
+  "plot": {"widthCm":700,"depthCm":500,"shape":"rectangular","entrance":"E",
+           "setbacks":{"front":150,"rear":150,"left":90,"right":90}},
+  "vastu": {"mode":"loose"},
+  "rooms": [
+    {"name":"Living Room","x":150,"y":90,"w":200,"h":320},
+    {"name":"Bedroom",    "x":350,"y":90,"w":200,"h":200},
+    {"name":"Kitchen",    "x":350,"y":290,"w":200,"h":120},
+    {"name":"Bathroom",   "x":150,"y":410,"w":120,"h":0}
+  ]
+}
+
+Note: in the example rooms share edges (Living Room right edge x=350 = Bedroom left edge x=350).
+
+Now generate a complete layout for the user's requirements.`;
+
+export function buildUserPrompt(params: {
+  prompt: string;
+  plot: Plot;
+  vastu: VastuConfig;
+}): string {
+  const { prompt, plot, vastu } = params;
+  const { widthCm, depthCm, entrance, setbacks, shape } = plot;
+
+  let xMin: number, xMax: number, yMin: number, yMax: number;
+  const { front: f, rear: r, left: l, right: rt } = setbacks;
+  switch (entrance) {
+    case 'N': xMin = l; xMax = widthCm - rt; yMin = f; yMax = depthCm - r; break;
+    case 'S': xMin = rt; xMax = widthCm - l; yMin = r; yMax = depthCm - f; break;
+    case 'E': xMin = r; xMax = widthCm - f; yMin = l; yMax = depthCm - rt; break;
+    case 'W': xMin = f; xMax = widthCm - r; yMin = rt; yMax = depthCm - l; break;
+  }
+
+  const buildableW = xMax! - xMin!;
+  const buildableH = yMax! - yMin!;
+  const plotSqM = ((widthCm / 100) * (depthCm / 100)).toFixed(1);
+
+  return `PLOT:
+  Size: ${widthCm} × ${depthCm} cm (${plotSqM} m²), shape: ${shape}
+  Entrance: ${entrance}
+  Buildable zone: x ∈ [${xMin}, ${xMax}] (width ${buildableW} cm), y ∈ [${yMin}, ${yMax}] (height ${buildableH} cm)
+  Plot centre: (${widthCm / 2}, ${depthCm / 2})
+
+VASTU MODE: ${vastu.mode}
+
+REQUIREMENTS:
+${prompt}
+
+Generate the rooms[] array. All rooms must fit inside x ∈ [${xMin}, ${xMax}], y ∈ [${yMin}, ${yMax}].
+Adjacent rooms share edges. No overlaps. Fill the space efficiently.`;
+}
