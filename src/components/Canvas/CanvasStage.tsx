@@ -2,7 +2,7 @@
  * CanvasStage — the editor surface.
  *
  * Owns all TRANSIENT, high-frequency state (viewport pan/zoom, the rubber-band
- * wall, the in-progress point drag) in local state/refs. It writes to
+ * wall, the in-progress point/furniture drag) in local state/refs. Writes to
  * PlanContext only on discrete commits — finishing a segment, ending a drag,
  * deleting — exactly as the state rules in CLAUDE.md require.
  */
@@ -17,6 +17,7 @@ import {
   panBy,
   zoomAt,
   distance,
+  distanceToSegment,
   type Viewport,
   type Vec2,
 } from '../../model/geometry';
@@ -26,7 +27,15 @@ import {
   movePoint,
   deleteWall,
   deletePoint,
+  addOpening,
+  deleteOpening,
+  addFurniture,
+  moveFurniture,
+  rotateFurniture,
+  deleteFurniture,
   DEFAULT_WALL_THICKNESS,
+  DEFAULT_DOOR_WIDTH,
+  DEFAULT_WINDOW_WIDTH,
 } from '../../model/planEdits';
 import { usePlan } from '../../state/PlanContext';
 import { useTool } from '../../state/ToolContext';
@@ -37,10 +46,14 @@ import { snapWorldPoint, type SnapCandidate } from './snapping';
 import { GridLayer } from './GridLayer';
 import { RoomsLayer } from './RoomsLayer';
 import { WallsLayer } from './WallsLayer';
+import { OpeningsLayer } from './OpeningsLayer';
+import { FurnitureLayer } from './FurnitureLayer';
 import { DraftLayer } from './DraftLayer';
 
 /** Point-snap tolerance in screen pixels. */
 const SNAP_PX = 12;
+/** Wall hit tolerance in screen pixels for placing openings. */
+const WALL_HIT_PX = 20;
 const ZOOM_STEP = 1.1;
 
 interface DraftStart {
@@ -50,7 +63,7 @@ interface DraftStart {
 
 export function CanvasStage() {
   const { plan, commit, undo, redo } = usePlan();
-  const { tool, grid } = useTool();
+  const { tool, setTool, grid, activeFurnitureType } = useTool();
   const { selection, select, clear } = useSelection();
 
   const floor = plan.floors[0]!;
@@ -61,6 +74,7 @@ export function CanvasStage() {
   const [cursor, setCursor] = useState<{ pos: Vec2; snapped: boolean } | null>(null);
   const [draftStart, setDraftStart] = useState<DraftStart | null>(null);
   const [override, setOverride] = useState<Record<ID, Vec2>>({});
+  const [furnitureOverride, setFurnitureOverride] = useState<Record<ID, Vec2>>({});
   const [spaceDown, setSpaceDown] = useState(false);
 
   const panning = useRef<{ active: boolean; last: Vec2 }>({
@@ -73,11 +87,7 @@ export function CanvasStage() {
   useEffect(() => {
     if (didInitView.current || size.width === 0) return;
     didInitView.current = true;
-    const zoom = 0.35;
-    setViewport({
-      zoom,
-      pan: { x: 90, y: 90 },
-    });
+    setViewport({ zoom: 0.35, pan: { x: 90, y: 90 } });
   }, [size.width]);
 
   const invZoom = 1 / viewport.zoom;
@@ -87,7 +97,6 @@ export function CanvasStage() {
     [floor.points],
   );
 
-  /** Snap a raw world point under current settings. */
   const snapAt = useCallback(
     (raw: Vec2, opts: { shift: boolean; anchor?: Vec2 | null; excludeId?: ID }) =>
       snapWorldPoint(raw, {
@@ -131,32 +140,88 @@ export function CanvasStage() {
         return;
       }
 
-      if (tool === 'wall' && evt.button === 0) {
-        const world = pointerWorld(stage);
-        if (!world) return;
-        const snap = snapAt(world, {
-          shift: evt.shiftKey,
-          anchor: draftStart?.pos ?? null,
-        });
+      if (evt.button !== 0) return;
+
+      const world = pointerWorld(stage);
+      if (!world) return;
+
+      /* ---- Wall tool ---- */
+      if (tool === 'wall') {
+        const snap = snapAt(world, { shift: evt.shiftKey, anchor: draftStart?.pos ?? null });
         if (!draftStart) {
           setDraftStart({ id: snap.pointId, pos: { x: snap.x, y: snap.y } });
           return;
         }
-        // Ignore zero-length segments.
         if (distance(draftStart.pos, snap) < 1) return;
         const result = drawWall(
-          plan,
-          floorId,
+          plan, floorId,
           { id: draftStart.id, x: draftStart.pos.x, y: draftStart.pos.y },
           { id: snap.pointId, x: snap.x, y: snap.y },
           DEFAULT_WALL_THICKNESS,
         );
         commit(result.plan);
-        // Chain: the just-placed end becomes the next start.
         setDraftStart({ id: result.endId, pos: { x: snap.x, y: snap.y } });
+        return;
+      }
+
+      /* ---- Door / Window tool ---- */
+      if (tool === 'door' || tool === 'window') {
+        const thresholdCm = screenLengthToWorld(WALL_HIT_PX, viewport);
+        let bestWall: { id: ID; offset: number; thickness: number } | null = null;
+        let bestDist = thresholdCm;
+
+        for (const wall of floor.walls) {
+          const ptA = floor.points.find((p) => p.id === wall.a);
+          const ptB = floor.points.find((p) => p.id === wall.b);
+          if (!ptA || !ptB) continue;
+          const { distance: dist, closest } = distanceToSegment(world, ptA, ptB);
+          if (dist < bestDist) {
+            bestDist = dist;
+            const offsetFromA = distance(ptA, closest);
+            bestWall = { id: wall.id, offset: offsetFromA, thickness: wall.thickness };
+          }
+        }
+
+        if (!bestWall) return;
+
+        const theWall = floor.walls.find((w) => w.id === bestWall!.id)!;
+        const ptA = floor.points.find((p) => p.id === theWall.a)!;
+        const ptB = floor.points.find((p) => p.id === theWall.b)!;
+        const wallLen = distance(ptA, ptB);
+        const opWidth = tool === 'door' ? DEFAULT_DOOR_WIDTH : DEFAULT_WINDOW_WIDTH;
+        const margin = theWall.thickness / 2;
+        if (wallLen < opWidth + margin * 2) return; // wall too short
+
+        // Center opening on click projection, then clamp to valid range.
+        let offset = bestWall.offset - opWidth / 2;
+        offset = Math.max(margin, Math.min(wallLen - opWidth - margin, offset));
+
+        const { plan: newPlan } = addOpening(plan, floorId, {
+          wallId: bestWall.id,
+          kind: tool,
+          offset,
+          width: opWidth,
+        });
+        commit(newPlan);
+        return;
+      }
+
+      /* ---- Furniture placement tool ---- */
+      if (tool === 'furniture' && activeFurnitureType) {
+        const snap = snapAt(world, { shift: false });
+        const { plan: newPlan } = addFurniture(plan, floorId, {
+          type: activeFurnitureType,
+          x: snap.x,
+          y: snap.y,
+          rotationDeg: 0,
+        });
+        commit(newPlan);
+        setTool('select');
+        return;
       }
     },
-    [spaceDown, tool, draftStart, snapAt, plan, floorId, commit],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [spaceDown, tool, draftStart, snapAt, plan, floorId, viewport, activeFurnitureType, commit, setTool, floor],
   );
 
   const handleMouseMove = useCallback(
@@ -176,10 +241,7 @@ export function CanvasStage() {
       if (tool === 'wall') {
         const world = pointerWorld(stage);
         if (!world) return;
-        const snap = snapAt(world, {
-          shift: evt.shiftKey,
-          anchor: draftStart?.pos ?? null,
-        });
+        const snap = snapAt(world, { shift: evt.shiftKey, anchor: draftStart?.pos ?? null });
         setCursor({ pos: { x: snap.x, y: snap.y }, snapped: snap.pointId !== undefined });
       } else if (cursor) {
         setCursor(null);
@@ -188,13 +250,10 @@ export function CanvasStage() {
     [tool, draftStart, snapAt, cursor],
   );
 
-  const endPan = useCallback(() => {
-    panning.current.active = false;
-  }, []);
+  const endPan = useCallback(() => { panning.current.active = false; }, []);
 
   const handleClick = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
-      // Empty-space click in Select tool clears the selection.
       if (tool === 'select' && e.target === e.target.getStage()) {
         clear();
       }
@@ -223,65 +282,104 @@ export function CanvasStage() {
     [snapAt, commit, plan, floorId],
   );
 
+  /* -------------------------- Furniture drag ----------------------------- */
+
+  const handleFurnitureDragMove = useCallback(
+    (id: ID, raw: Vec2): Vec2 => {
+      const snap = snapAt(raw, { shift: false });
+      const pos = { x: snap.x, y: snap.y };
+      setFurnitureOverride({ [id]: pos });
+      return pos;
+    },
+    [snapAt],
+  );
+
+  const handleFurnitureDragEnd = useCallback(
+    (id: ID, raw: Vec2) => {
+      const snap = snapAt(raw, { shift: false });
+      commit(moveFurniture(plan, floorId, id, snap.x, snap.y));
+      setFurnitureOverride({});
+    },
+    [snapAt, commit, plan, floorId],
+  );
+
   /* --------------------------- Keyboard input ---------------------------- */
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (e.key === ' ') {
-        setSpaceDown(true);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setDraftStart(null);
-        clear();
-        return;
-      }
+
+      if (e.key === ' ') { setSpaceDown(true); return; }
+      if (e.key === 'Escape') { setDraftStart(null); clear(); setTool('select'); return; }
+
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
+        if (e.shiftKey) redo(); else undo();
         return;
       }
-      if (mod && e.key.toLowerCase() === 'y') {
-        e.preventDefault();
-        redo();
-        return;
+      if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+
+      if (!mod) {
+        // Tool shortcuts
+        if (e.key === 'v' || e.key === 'V') { setTool('select'); return; }
+        if (e.key === 'w' || e.key === 'W') { setTool('wall'); return; }
+        if (e.key === 'd' || e.key === 'D') { setTool('door'); return; }
+        if (e.key === 'n' || e.key === 'N') { setTool('window'); return; }
+        if (e.key === 'f' || e.key === 'F') { setTool('furniture'); return; }
+
+        // Rotate selected furniture
+        if (e.key === 'r' || e.key === 'R') {
+          if (selection?.kind === 'furniture') {
+            const item = floor.furniture.find((f) => f.id === selection.id);
+            if (item) {
+              commit(rotateFurniture(plan, floorId, selection.id, (item.rotationDeg + 90) % 360));
+            }
+          }
+          return;
+        }
       }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!selection) return;
         e.preventDefault();
-        commit(
-          selection.kind === 'wall'
-            ? deleteWall(plan, floorId, selection.id)
-            : deletePoint(plan, floorId, selection.id),
-        );
+        if (selection.kind === 'wall') commit(deleteWall(plan, floorId, selection.id));
+        else if (selection.kind === 'point') commit(deletePoint(plan, floorId, selection.id));
+        else if (selection.kind === 'opening') commit(deleteOpening(plan, floorId, selection.id));
+        else if (selection.kind === 'furniture') commit(deleteFurniture(plan, floorId, selection.id));
         clear();
       }
     };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === ' ') setSpaceDown(false);
-    };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === ' ') setSpaceDown(false); };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [selection, plan, floorId, commit, clear, undo, redo]);
+  }, [selection, plan, floorId, floor, commit, clear, undo, redo, setTool]);
 
   /* ------------------------------- Render -------------------------------- */
 
   const worldMin = screenToWorld({ x: 0, y: 0 }, viewport);
   const worldMax = screenToWorld({ x: size.width, y: size.height }, viewport);
 
-  const cursorStyle = panning.current.active || spaceDown
-    ? 'grab'
-    : tool === 'wall'
-      ? 'crosshair'
-      : 'default';
+  const cursorStyle =
+    panning.current.active || spaceDown ? 'grab'
+    : tool === 'wall' ? 'crosshair'
+    : (tool === 'door' || tool === 'window') ? 'crosshair'
+    : tool === 'furniture' ? 'copy'
+    : 'default';
 
-  const interactive = tool === 'select';
+  const selectedOpeningId = selection?.kind === 'opening' ? selection.id : null;
+  const selectedFurnitureId = selection?.kind === 'furniture' ? selection.id : null;
+
+  const statusHint =
+    tool === 'wall' ? 'Click to place points · Shift = 45° lock · Esc to finish'
+    : tool === 'door' ? 'Click a wall to place door · Esc to cancel'
+    : tool === 'window' ? 'Click a wall to place window · Esc to cancel'
+    : tool === 'furniture' ? 'Pick an item in the palette, then click to place · Esc to cancel'
+    : selection?.kind === 'furniture' ? 'Drag to move · R to rotate · Del to remove'
+    : null;
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-white">
@@ -315,6 +413,22 @@ export function CanvasStage() {
               onPointDragMove={handlePointDragMove}
               onPointDragEnd={handlePointDragEnd}
             />
+            <OpeningsLayer
+              floor={floor}
+              invZoom={invZoom}
+              selectedOpeningId={selectedOpeningId}
+              onSelectOpening={(id) => select({ kind: 'opening', id })}
+            />
+            <FurnitureLayer
+              floor={floor}
+              override={furnitureOverride}
+              tool={tool}
+              selectedFurnitureId={selectedFurnitureId}
+              invZoom={invZoom}
+              onSelectFurniture={(id) => select({ kind: 'furniture', id })}
+              onFurnitureDragMove={handleFurnitureDragMove}
+              onFurnitureDragEnd={handleFurnitureDragEnd}
+            />
             {tool === 'wall' && (
               <DraftLayer
                 start={draftStart?.pos ?? null}
@@ -332,9 +446,9 @@ export function CanvasStage() {
         {Math.round(viewport.zoom * 100)}% · grid {grid.sizeCm}cm
       </div>
 
-      {!interactive && (
+      {statusHint && (
         <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-slate-800/80 px-2 py-1 text-xs text-white">
-          Click to place points · Shift = 45° lock · Esc to finish
+          {statusHint}
         </div>
       )}
     </div>

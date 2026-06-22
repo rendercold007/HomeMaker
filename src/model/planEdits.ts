@@ -8,7 +8,7 @@
  * These operate on a single "active" floor identified by id; the rest of the
  * plan is passed through untouched.
  */
-import type { Floor, ID, Plan, Point } from './types';
+import type { Floor, Furniture, ID, Opening, Plan, Point } from './types';
 import { detectRooms } from './roomDetect';
 import { newId as defaultNewId } from './ids';
 
@@ -162,6 +162,83 @@ export function deletePoint(plan: Plan, floorId: ID, pointId: ID): Plan {
   const points = floor.points.filter((p) => p.id !== pointId);
   const next = dropOrphanPoints({ ...floor, walls, openings, points });
   return recomputeRooms(withFloor(plan, floorId, next));
+}
+
+/** Default widths for new openings, in cm. */
+export const DEFAULT_DOOR_WIDTH = 90;
+export const DEFAULT_WINDOW_WIDTH = 120;
+
+/** Add a door or window opening to a wall. Returns the new plan and the opening id. */
+export function addOpening(
+  plan: Plan,
+  floorId: ID,
+  opening: Omit<Opening, 'id'>,
+  newId: IdGen = defaultNewId,
+): { plan: Plan; openingId: ID } {
+  const floor = getFloor(plan, floorId);
+  const id = newId();
+  const full: Opening = { id, ...opening };
+  const next: Floor = { ...floor, openings: [...floor.openings, full] };
+  return { plan: withFloor(plan, floorId, next), openingId: id };
+}
+
+/** Remove an opening by id. */
+export function deleteOpening(plan: Plan, floorId: ID, openingId: ID): Plan {
+  const floor = getFloor(plan, floorId);
+  const openings = floor.openings.filter((o) => o.id !== openingId);
+  if (openings.length === floor.openings.length) return plan;
+  return withFloor(plan, floorId, { ...floor, openings });
+}
+
+/** Place a furniture item on the floor. Returns the new plan and the furniture id. */
+export function addFurniture(
+  plan: Plan,
+  floorId: ID,
+  item: Omit<Furniture, 'id'>,
+  newId: IdGen = defaultNewId,
+): { plan: Plan; furnitureId: ID } {
+  const floor = getFloor(plan, floorId);
+  const id = newId();
+  const full: Furniture = { id, ...item };
+  const next: Floor = { ...floor, furniture: [...floor.furniture, full] };
+  return { plan: withFloor(plan, floorId, next), furnitureId: id };
+}
+
+/** Move a placed furniture item. */
+export function moveFurniture(
+  plan: Plan,
+  floorId: ID,
+  furnitureId: ID,
+  x: number,
+  y: number,
+): Plan {
+  const floor = getFloor(plan, floorId);
+  const furniture = floor.furniture.map((f) =>
+    f.id === furnitureId ? { ...f, x, y } : f,
+  );
+  return withFloor(plan, floorId, { ...floor, furniture });
+}
+
+/** Rotate a placed furniture item (degrees, clockwise). */
+export function rotateFurniture(
+  plan: Plan,
+  floorId: ID,
+  furnitureId: ID,
+  rotationDeg: number,
+): Plan {
+  const floor = getFloor(plan, floorId);
+  const furniture = floor.furniture.map((f) =>
+    f.id === furnitureId ? { ...f, rotationDeg } : f,
+  );
+  return withFloor(plan, floorId, { ...floor, furniture });
+}
+
+/** Remove a furniture item. */
+export function deleteFurniture(plan: Plan, floorId: ID, furnitureId: ID): Plan {
+  const floor = getFloor(plan, floorId);
+  const furniture = floor.furniture.filter((f) => f.id !== furnitureId);
+  if (furniture.length === floor.furniture.length) return plan;
+  return withFloor(plan, floorId, { ...floor, furniture });
 }
 
 /** A blank floor at the given level. */

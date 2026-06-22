@@ -10,6 +10,7 @@ import { ToolProvider } from './state/ToolContext';
 import { SelectionProvider } from './state/SelectionContext';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { CanvasStage } from './components/Canvas/CanvasStage';
+import { FurniturePalette } from './components/Panels/FurniturePalette';
 import { InfoPanel } from './components/Panels/InfoPanel';
 
 export default function App() {
@@ -20,10 +21,11 @@ export default function App() {
           <div className="flex h-screen w-screen flex-col bg-white text-slate-900">
             <header className="flex items-center gap-3 border-b border-slate-200 px-3 py-2">
               <h1 className="text-base font-semibold">HomeMaker</h1>
-              <span className="text-xs text-slate-400">Phase 1 · 2D editor</span>
+              <span className="text-xs text-slate-400">Phase 2 · Openings + Furniture</span>
             </header>
             <Toolbar />
             <div className="flex min-h-0 flex-1">
+              <FurniturePalette />
               <main className="min-w-0 flex-1">
                 <CanvasStage />
               </main>

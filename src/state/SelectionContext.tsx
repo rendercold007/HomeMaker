@@ -14,7 +14,7 @@ import {
 } from 'react';
 import type { ID } from '../model/types';
 
-export type SelectionKind = 'wall' | 'point';
+export type SelectionKind = 'wall' | 'point' | 'opening' | 'furniture';
 
 export interface Selection {
   kind: SelectionKind;

@@ -8,8 +8,11 @@ import { usePlan } from '../../state/PlanContext';
 import { useTool, type Tool } from '../../state/ToolContext';
 
 const TOOLS: { id: Tool; label: string; hint: string }[] = [
-  { id: 'select', label: 'Select', hint: 'V — select, drag, delete' },
-  { id: 'wall', label: 'Wall', hint: 'W — draw walls' },
+  { id: 'select',    label: 'Select', hint: 'V — select, drag, delete' },
+  { id: 'wall',      label: 'Wall',   hint: 'W — draw walls' },
+  { id: 'door',      label: 'Door',   hint: 'D — click a wall to place door' },
+  { id: 'window',    label: 'Window', hint: 'N — click a wall to place window' },
+  { id: 'furniture', label: 'Furnish',hint: 'F — pick item in palette, click to place' },
 ];
 
 function Button({

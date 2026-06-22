@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 
-export type Tool = 'select' | 'wall';
+export type Tool = 'select' | 'wall' | 'door' | 'window' | 'furniture';
 
 export interface GridSettings {
   /** Grid spacing in world cm. */
@@ -29,6 +29,9 @@ interface ToolContextValue {
   setTool: (t: Tool) => void;
   grid: GridSettings;
   setGrid: (next: Partial<GridSettings>) => void;
+  /** Furniture type currently selected for placement (used by 'furniture' tool). */
+  activeFurnitureType: string | null;
+  setActiveFurnitureType: (type: string | null) => void;
 }
 
 const DEFAULT_GRID: GridSettings = { sizeCm: 30, visible: true, snap: true };
@@ -38,14 +41,15 @@ const ToolContext = createContext<ToolContextValue | null>(null);
 export function ToolProvider({ children }: { children: ReactNode }) {
   const [tool, setTool] = useState<Tool>('select');
   const [grid, setGridState] = useState<GridSettings>(DEFAULT_GRID);
+  const [activeFurnitureType, setActiveFurnitureType] = useState<string | null>(null);
 
   const setGrid = useCallback((next: Partial<GridSettings>) => {
     setGridState((g) => ({ ...g, ...next }));
   }, []);
 
   const value = useMemo<ToolContextValue>(
-    () => ({ tool, setTool, grid, setGrid }),
-    [tool, grid, setGrid],
+    () => ({ tool, setTool, grid, setGrid, activeFurnitureType, setActiveFurnitureType }),
+    [tool, grid, setGrid, activeFurnitureType],
   );
 
   return <ToolContext.Provider value={value}>{children}</ToolContext.Provider>;
