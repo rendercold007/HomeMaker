@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
-import { SYSTEM_PROMPT, buildUserPrompt } from '../src/ai/prompts';
+import { SYSTEM_PROMPT, buildUserPrompt } from './_prompts';
 import { extractJson } from './_shared';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!apiKey) return res.status(500).json({ error: 'DEEPSEEK_API_KEY is not configured.' });
 
   try {
-    const body = req.body as { prompt: string; plot: unknown; vastu: unknown };
+    const body = req.body as { prompt: string; plot: Parameters<typeof buildUserPrompt>[0]['plot']; vastu: Parameters<typeof buildUserPrompt>[0]['vastu'] };
     const client = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
 
     const completion = await client.chat.completions.create({
@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       temperature: 0.3,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user',   content: buildUserPrompt(body as Parameters<typeof buildUserPrompt>[0]) },
+        { role: 'user',   content: buildUserPrompt(body) },
       ],
     });
 
