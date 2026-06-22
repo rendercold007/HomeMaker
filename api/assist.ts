@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
-import { SYSTEM_PROMPT, buildAssistPrompt } from './_prompts';
-import { extractJson } from './_shared';
+import { SYSTEM_PROMPT, buildAssistPrompt } from './_prompts.js';
+import { extractJson } from './_shared.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
