@@ -77,7 +77,7 @@ export function InfoPanel() {
   }
 
   return (
-    <aside className="flex h-full w-56 flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-slate-50 p-3 text-sm">
+    <aside className="flex min-h-0 flex-1 w-56 flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-slate-50 p-3 text-sm">
       <section>
         <h2 className="mb-1 font-semibold text-slate-700">Plan</h2>
         <dl className="space-y-0.5 text-slate-600">

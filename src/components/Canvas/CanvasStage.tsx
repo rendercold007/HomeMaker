@@ -160,7 +160,13 @@ export function CanvasStage() {
           DEFAULT_WALL_THICKNESS,
         );
         commit(result.plan);
-        setDraftStart({ id: result.endId, pos: { x: snap.x, y: snap.y } });
+        // Snapped to an existing vertex → loop closed or junction hit; end the chain.
+        // Fresh point → continue the polyline from the new endpoint.
+        if (snap.pointId !== undefined) {
+          setDraftStart(null);
+        } else {
+          setDraftStart({ id: result.endId, pos: { x: snap.x, y: snap.y } });
+        }
         return;
       }
 
