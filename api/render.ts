@@ -22,7 +22,7 @@ interface ImageMessage {
   images?: Array<{ image_url?: { url?: string } }>;
 }
 
-function buildPrompt(plan: Plan, view: ViewType, hasFloorPlan: boolean): string {
+function buildPrompt(plan: Plan, view: ViewType, hasFloorPlan: boolean, scene?: string): string {
   const { plot, vastu, floors } = plan;
   const rooms = floors[0]?.rooms ?? [];
   const roomList = rooms.map(r => r.name).join(', ');
@@ -37,9 +37,12 @@ function buildPrompt(plan: Plan, view: ViewType, hasFloorPlan: boolean): string 
     : '';
 
   if (view === 'interior') {
+    const focus = scene
+      ? `Show the ${scene}, viewed from inside the room at standing eye level. `
+      : '';
     return (
       `${planRef}Generate a photorealistic interior architectural render of a modern Indian residential home. ` +
-      `Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ` +
+      `${focus}Rooms in the home: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ` +
       `${vastuNote}warm Indian interior design, marble flooring in living areas, ` +
       `warm ambient lighting, wooden accents, decorative jali screens, ` +
       `traditional Indian artwork on walls, lush indoor plants. ` +
@@ -47,9 +50,12 @@ function buildPrompt(plan: Plan, view: ViewType, hasFloorPlan: boolean): string 
     );
   }
 
+  const angle = scene
+    ? `Show the ${scene}. `
+    : '';
   return (
     `${planRef}Generate a photorealistic exterior render of a modern Indian residential house. ` +
-    `${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ` +
+    `${angle}${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ` +
     `${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, ` +
     `traditional carved details, terracotta roof accents, landscaped front garden ` +
     `with jasmine and marigold, paved driveway. ` +
@@ -64,18 +70,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured.' });
 
   try {
-    const { plan, view = 'interior', quality = 'quick', image } = req.body as {
+    const { plan, view = 'interior', quality = 'quick', image, scene } = req.body as {
       plan: Plan;
       view?: ViewType;
       quality?: Quality;
       image?: string;  // PNG data URL of the 2D floor plan
+      scene?: string;  // specific room / angle to render
     };
 
     if (!plan) return res.status(400).json({ error: 'plan is required.' });
 
     const hasFloorPlan = typeof image === 'string' && image.startsWith('data:image');
     const client = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
-    const prompt = buildPrompt(plan, view, hasFloorPlan);
+    const prompt = buildPrompt(plan, view, hasFloorPlan, scene);
 
     // Multimodal message: text prompt + (optionally) the floor-plan image so the
     // render follows the actual layout instead of inventing one.

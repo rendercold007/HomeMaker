@@ -41,7 +41,9 @@ export function GeneratePanel() {
   const [renderQuality, setRenderQuality] = useState<Quality>('quick');
   const [renderLoading, setRenderLoading] = useState(false);
   const [renderError, setRenderError]     = useState<string | null>(null);
-  const [renderUrl, setRenderUrl]         = useState<string | null>(null);
+  const [renderImages, setRenderImages]   = useState<Array<{ url: string; label: string }>>([]);
+  const [renderProgress, setRenderProgress] = useState<{ done: number; total: number } | null>(null);
+  const [lightbox, setLightbox]           = useState<string | null>(null);
 
   function setPlotField<K extends keyof Plot>(key: K, value: Plot[K]) {
     setPlot((p) => ({ ...p, [key]: value }));
@@ -52,19 +54,57 @@ export function GeneratePanel() {
 
   const hasRooms = (plan.floors[0]?.rooms.length ?? 0) > 0;
 
+  // Pick the scenes to render. Interior → up to 4 key rooms from the plan.
+  // Exterior → a few standard angles.
+  function pickScenes(): string[] {
+    if (renderView === 'exterior') {
+      return ['front facade with main entrance', 'three-quarter angle view from the street'];
+    }
+    const names = (plan.floors[0]?.rooms ?? []).map((r) => r.name);
+    const priority = ['living', 'master', 'bedroom', 'kitchen', 'dining', 'pooja'];
+    const sorted = [...names].sort((a, b) => {
+      const ai = priority.findIndex((p) => a.toLowerCase().includes(p));
+      const bi = priority.findIndex((p) => b.toLowerCase().includes(p));
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    return sorted.slice(0, 4);
+  }
+
   async function handleRender() {
     if (renderLoading || !hasRooms) return;
     setRenderLoading(true);
     setRenderError(null);
-    try {
-      const floorPlanPng = captureStagePng();
-      const result = await renderPlan(plan, renderView, renderQuality, floorPlanPng);
-      setRenderUrl(result.url);
-    } catch (err) {
-      setRenderError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRenderLoading(false);
+    setRenderImages([]);
+
+    const scenes = pickScenes();
+    if (scenes.length === 0) { setRenderLoading(false); return; }
+
+    const floorPlanPng = captureStagePng();
+    setRenderProgress({ done: 0, total: scenes.length });
+
+    let done = 0;
+    const settled = await Promise.allSettled(
+      scenes.map(async (scene) => {
+        const result = await renderPlan(plan, { view: renderView, quality: renderQuality, image: floorPlanPng, scene });
+        done += 1;
+        setRenderProgress({ done, total: scenes.length });
+        return { url: result.url, label: scene };
+      }),
+    );
+
+    const images = settled
+      .filter((s): s is PromiseFulfilledResult<{ url: string; label: string }> => s.status === 'fulfilled')
+      .map((s) => s.value);
+
+    if (images.length === 0) {
+      const firstErr = settled.find((s) => s.status === 'rejected') as PromiseRejectedResult | undefined;
+      setRenderError(firstErr ? String(firstErr.reason?.message ?? firstErr.reason) : 'All renders failed.');
+    } else {
+      setRenderImages(images);
     }
+
+    setRenderProgress(null);
+    setRenderLoading(false);
   }
 
   async function handleGenerate() {
@@ -257,7 +297,7 @@ export function GeneratePanel() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Rendering… (10–30s)
+                {renderProgress ? `Rendering ${renderProgress.done}/${renderProgress.total}…` : 'Rendering…'}
               </>
             ) : (
               <>
@@ -265,7 +305,7 @@ export function GeneratePanel() {
                   <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
                   <path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13zm13 1a.5.5 0 0 1 .5.5v6l-3.775-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12v.54L1 12.5v-9a.5.5 0 0 1 .5-.5h13z"/>
                 </svg>
-                Generate Render
+                {renderView === 'interior' ? 'Render Rooms' : 'Render Exterior'}
               </>
             )}
           </button>
@@ -273,22 +313,40 @@ export function GeneratePanel() {
           {renderError && (
             <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-400">{renderError}</div>
           )}
+
+          {/* Thumbnail gallery */}
+          {renderImages.length > 0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {renderImages.map((img, i) => (
+                <button
+                  key={i}
+                  onClick={() => setLightbox(img.url)}
+                  className="group relative aspect-square overflow-hidden rounded-lg border border-white/10"
+                >
+                  <img src={img.url} alt={img.label} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                  <span className="absolute inset-x-0 bottom-0 truncate bg-black/70 px-1.5 py-1 text-[9px] capitalize text-slate-200">
+                    {img.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
       </>
 
-      {/* ── Image modal ─────────────────────────────────────────────────── */}
-      {renderUrl && (
+      {/* ── Lightbox ─────────────────────────────────────────────────────── */}
+      {lightbox && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-          onClick={() => setRenderUrl(null)}
+          onClick={() => setLightbox(null)}
         >
           <div
             className="relative max-w-2xl w-full rounded-2xl overflow-hidden shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <img src={renderUrl} alt="AI render" className="w-full h-auto block" />
+            <img src={lightbox} alt="AI render" className="w-full h-auto block" />
             <div className="absolute top-3 right-3 flex gap-2">
               <a
-                href={renderUrl}
+                href={lightbox}
                 download="homemaker-render.png"
                 target="_blank"
                 rel="noreferrer"
@@ -302,16 +360,13 @@ export function GeneratePanel() {
                 Save
               </a>
               <button
-                onClick={() => setRenderUrl(null)}
+                onClick={() => setLightbox(null)}
                 className="flex items-center justify-center rounded-lg bg-black/60 p-1.5 text-white backdrop-blur hover:bg-black/80"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
                   <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854z"/>
                 </svg>
               </button>
-            </div>
-            <div className="bg-black/80 px-4 py-2.5 text-[10px] text-slate-400 leading-relaxed">
-              {renderView === 'interior' ? 'Interior' : 'Exterior'} · {renderQuality === 'quick' ? 'Gemini Flash Image' : 'Gemini Pro Image'} · Click outside to close
             </div>
           </div>
         </div>

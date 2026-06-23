@@ -137,6 +137,7 @@ function aiProxyPlugin(): Plugin {
             view?: 'interior' | 'exterior';
             quality?: 'quick' | 'hd';
             image?: string;
+            scene?: string;
           }>(req);
 
           const apiKey = env.OPENROUTER_API_KEY;
@@ -146,7 +147,7 @@ function aiProxyPlugin(): Plugin {
           }
 
           const { default: OpenAI } = await import('openai');
-          const { plan, view = 'interior', quality = 'quick', image } = body;
+          const { plan, view = 'interior', quality = 'quick', image, scene } = body;
 
           const MODEL: Record<string, string> = {
             quick: 'google/gemini-3.1-flash-image',
@@ -161,10 +162,11 @@ function aiProxyPlugin(): Plugin {
           const facing   = ({ N:'north', S:'south', E:'east', W:'west' } as Record<string, string>)[plan.plot.entrance] ?? 'north';
           const vastuNote = plan.vastu.mode !== 'off' ? 'Vastu Shastra compliant, ' : '';
           const planRef   = hasFloorPlan ? 'Use the attached 2D floor plan as the exact structural reference — keep the same room positions, proportions, and adjacencies shown in the plan. ' : '';
+          const focus     = scene ? (view === 'interior' ? `Show the ${scene}, viewed from inside the room at standing eye level. ` : `Show the ${scene}. `) : '';
 
           const prompt = view === 'interior'
-            ? `${planRef}Generate a photorealistic interior architectural render of a modern Indian residential home. Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ${vastuNote}warm Indian interior design, marble flooring in living areas, warm ambient lighting, wooden accents, decorative jali screens, traditional Indian artwork on walls, lush indoor plants. Ultra-realistic, professional architectural photography, 8K detail, dramatic lighting.`
-            : `${planRef}Generate a photorealistic exterior render of a modern Indian residential house. ${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, traditional carved details, terracotta roof accents, landscaped front garden with jasmine and marigold, paved driveway. Golden hour lighting, professional architectural photography, ultra-detailed, 8K.`;
+            ? `${planRef}Generate a photorealistic interior architectural render of a modern Indian residential home. ${focus}Rooms in the home: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ${vastuNote}warm Indian interior design, marble flooring in living areas, warm ambient lighting, wooden accents, decorative jali screens, traditional Indian artwork on walls, lush indoor plants. Ultra-realistic, professional architectural photography, 8K detail, dramatic lighting.`
+            : `${planRef}Generate a photorealistic exterior render of a modern Indian residential house. ${focus}${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, traditional carved details, terracotta roof accents, landscaped front garden with jasmine and marigold, paved driveway. Golden hour lighting, professional architectural photography, ultra-detailed, 8K.`;
 
           const content: Array<Record<string, unknown>> = [{ type: 'text', text: prompt }];
           if (hasFloorPlan) content.push({ type: 'image_url', image_url: { url: image } });
