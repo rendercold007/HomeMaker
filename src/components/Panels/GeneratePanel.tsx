@@ -188,8 +188,7 @@ export function GeneratePanel() {
       )}
 
       {/* ── Visualize ──────────────────────────────────────────────────── */}
-      {hasRooms && (
-        <>
+      <>
           <div className="border-t border-white/5" />
 
           <div>
@@ -239,9 +238,15 @@ export function GeneratePanel() {
             ))}
           </div>
 
+          {!hasRooms && (
+            <p className="text-[11px] text-amber-400/80 bg-amber-400/10 rounded-lg px-3 py-2">
+              Generate a plan or draw rooms first to enable rendering.
+            </p>
+          )}
+
           <button
             onClick={() => { void handleRender(); }}
-            disabled={renderLoading}
+            disabled={renderLoading || !hasRooms}
             className="flex items-center justify-center gap-2 rounded-xl bg-rose-600 py-2.5 text-xs font-semibold text-white shadow-lg shadow-rose-500/20 transition-all hover:bg-rose-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {renderLoading ? (
@@ -266,8 +271,7 @@ export function GeneratePanel() {
           {renderError && (
             <div className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-400">{renderError}</div>
           )}
-        </>
-      )}
+      </>
 
       {/* ── Image modal ─────────────────────────────────────────────────── */}
       {renderUrl && (
