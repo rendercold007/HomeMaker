@@ -129,7 +129,7 @@ export function detectRooms(points: readonly Point[], walls: readonly Wall[]): R
       // Stable id derived from the wall set, so recomputation keeps room ids
       // consistent across edits that don't change a room's boundary.
       const id = `room:${[...wallIds].sort().join(',')}`;
-      rooms.push({ id, wallIds, name: 'Room', areaCm2: Math.round(signed) });
+      rooms.push({ id, wallIds, name: 'Room', type: 'other', areaCm2: Math.round(signed) });
     }
   }
 

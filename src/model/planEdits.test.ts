@@ -6,6 +6,10 @@ import {
   movePoint,
   deleteWall,
   deletePoint,
+  setRoomName,
+  setRoomType,
+  addFloor,
+  deleteFloor,
 } from './planEdits';
 import type { ID, Plan } from './types';
 
@@ -149,6 +153,58 @@ describe('deletePoint', () => {
     // The corner touched 2 walls; both should be gone.
     expect(after.floors[0]!.walls).toHaveLength(2);
     expect(after.floors[0]!.rooms).toHaveLength(0);
+  });
+});
+
+describe('room name & type', () => {
+  it('setRoomName and setRoomType update the room', () => {
+    const { plan, floorId } = freshPlan();
+    const done = square(plan, floorId, counter('g'));
+    const roomId = done.floors[0]!.rooms[0]!.id;
+
+    const named = setRoomName(done, floorId, roomId, 'Master Bedroom');
+    expect(named.floors[0]!.rooms[0]!.name).toBe('Master Bedroom');
+
+    const typed = setRoomType(named, floorId, roomId, 'bedroom');
+    expect(typed.floors[0]!.rooms[0]!.type).toBe('bedroom');
+  });
+
+  it('name and type survive a geometry edit that keeps the wall set', () => {
+    const { plan, floorId } = freshPlan();
+    let p = square(plan, floorId, counter('g'));
+    const roomId = p.floors[0]!.rooms[0]!.id;
+    p = setRoomType(setRoomName(p, floorId, roomId, 'Kitchen'), floorId, roomId, 'kitchen');
+
+    // Drag a corner: recomputes rooms but the wall set (and id) is unchanged.
+    const corner = p.floors[0]!.points.find((pt) => pt.x === 100 && pt.y === 100)!;
+    const moved = movePoint(p, floorId, corner.id, 150, 150);
+
+    const room = moved.floors[0]!.rooms[0]!;
+    expect(room.name).toBe('Kitchen');
+    expect(room.type).toBe('kitchen');
+    expect(room.id).toBe(roomId); // stable id ⇒ exact carry-over
+  });
+});
+
+describe('floors', () => {
+  it('addFloor adds an empty floor one level up and returns its id', () => {
+    const { plan } = freshPlan();
+    const r = addFloor(plan, counter('f'));
+    expect(r.plan.floors).toHaveLength(2);
+    const added = r.plan.floors.find((f) => f.id === r.floorId)!;
+    expect(added.level).toBe(1);
+    expect(added.walls).toEqual([]);
+  });
+
+  it('deleteFloor removes a floor but never the last one', () => {
+    const { plan } = freshPlan();
+    const two = addFloor(plan, counter('f')).plan;
+    const upperId = two.floors[1]!.id;
+    const afterDelete = deleteFloor(two, upperId);
+    expect(afterDelete.floors).toHaveLength(1);
+
+    const lastId = afterDelete.floors[0]!.id;
+    expect(deleteFloor(afterDelete, lastId).floors).toHaveLength(1); // no-op
   });
 });
 

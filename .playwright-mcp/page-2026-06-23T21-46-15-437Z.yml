@@ -1,0 +1,210 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e7]
+      - generic [ref=e9]:
+        - heading "HomeMaker" [level=1] [ref=e10]
+        - paragraph [ref=e11]: 2D → 3D Floor Plan Editor
+    - generic [ref=e13]: Untitled Plan
+    - generic [ref=e14]:
+      - button "Save" [ref=e15] [cursor=pointer]:
+        - img [ref=e16]
+        - generic [ref=e18]: Save
+      - button "PNG" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+        - text: PNG
+      - button "PDF" [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+        - text: PDF
+      - generic [ref=e27]:
+        - button "2D" [ref=e28] [cursor=pointer]
+        - button "3D" [ref=e29] [cursor=pointer]
+  - generic [ref=e30]:
+    - button "Select" [ref=e31] [cursor=pointer]:
+      - img [ref=e32]
+      - generic [ref=e34]: Select
+    - button "Wall" [ref=e35] [cursor=pointer]:
+      - img [ref=e36]
+      - generic [ref=e38]: Wall
+    - button "Door" [ref=e39] [cursor=pointer]:
+      - img [ref=e40]
+      - generic [ref=e42]: Door
+    - button "Window" [ref=e43] [cursor=pointer]:
+      - img [ref=e44]
+      - generic [ref=e47]: Window
+    - button "Furnish" [ref=e48] [cursor=pointer]:
+      - img [ref=e49]
+      - generic [ref=e51]: Furnish
+    - button "Undo" [disabled] [ref=e52]:
+      - img [ref=e53]
+      - text: Undo
+    - button "Redo" [disabled] [ref=e56]:
+      - img [ref=e57]
+      - text: Redo
+    - generic [ref=e60] [cursor=pointer]:
+      - checkbox "Grid" [checked] [ref=e61]
+      - text: Grid
+    - generic [ref=e62] [cursor=pointer]:
+      - checkbox "Snap" [checked] [ref=e63]
+      - text: Snap
+    - combobox [ref=e64]:
+      - option "15 cm"
+      - option "30 cm" [selected]
+      - option "50 cm"
+      - option "100 cm"
+    - generic [ref=e67]:
+      - generic [ref=e68]: Floor
+      - button "G" [ref=e70] [cursor=pointer]
+      - button "Add floor above" [ref=e71] [cursor=pointer]:
+        - img [ref=e72]
+      - button "Delete current floor" [disabled] [ref=e74]:
+        - img [ref=e75]
+  - generic [ref=e77]:
+    - generic [ref=e78]:
+      - generic [ref=e79]:
+        - button "⬡ Palette" [ref=e80] [cursor=pointer]:
+          - generic [ref=e81]: ⬡
+          - text: Palette
+        - button "▤ Plans" [ref=e82] [cursor=pointer]:
+          - generic [ref=e83]: ▤
+          - text: Plans
+      - complementary [ref=e85]:
+        - heading "Furniture" [level=2] [ref=e86]
+        - list [ref=e87]:
+          - listitem [ref=e88]:
+            - button "Double Bed 150×195 cm" [ref=e89] [cursor=pointer]:
+              - generic [ref=e92]: Double Bed
+              - generic [ref=e93]: 150×195 cm
+          - listitem [ref=e94]:
+            - button "Single Bed 90×195 cm" [ref=e95] [cursor=pointer]:
+              - generic [ref=e98]: Single Bed
+              - generic [ref=e99]: 90×195 cm
+          - listitem [ref=e100]:
+            - button "Wardrobe 120×60 cm" [ref=e101] [cursor=pointer]:
+              - generic [ref=e104]: Wardrobe
+              - generic [ref=e105]: 120×60 cm
+          - listitem [ref=e106]:
+            - button "Side Table 45×45 cm" [ref=e107] [cursor=pointer]:
+              - generic [ref=e110]: Side Table
+              - generic [ref=e111]: 45×45 cm
+          - listitem [ref=e112]:
+            - button "Sofa 210×90 cm" [ref=e113] [cursor=pointer]:
+              - generic [ref=e116]: Sofa
+              - generic [ref=e117]: 210×90 cm
+          - listitem [ref=e118]:
+            - button "Coffee Table 110×60 cm" [ref=e119] [cursor=pointer]:
+              - generic [ref=e122]: Coffee Table
+              - generic [ref=e123]: 110×60 cm
+          - listitem [ref=e124]:
+            - button "TV Unit 150×40 cm" [ref=e125] [cursor=pointer]:
+              - generic [ref=e128]: TV Unit
+              - generic [ref=e129]: 150×40 cm
+          - listitem [ref=e130]:
+            - button "Bookshelf 90×30 cm" [ref=e131] [cursor=pointer]:
+              - generic [ref=e134]: Bookshelf
+              - generic [ref=e135]: 90×30 cm
+          - listitem [ref=e136]:
+            - button "Dining Table 120×75 cm" [ref=e137] [cursor=pointer]:
+              - generic [ref=e140]: Dining Table
+              - generic [ref=e141]: 120×75 cm
+          - listitem [ref=e142]:
+            - button "Chair 45×45 cm" [ref=e143] [cursor=pointer]:
+              - generic [ref=e146]: Chair
+              - generic [ref=e147]: 45×45 cm
+          - listitem [ref=e148]:
+            - button "Counter 180×60 cm" [ref=e149] [cursor=pointer]:
+              - generic [ref=e152]: Counter
+              - generic [ref=e153]: 180×60 cm
+          - listitem [ref=e154]:
+            - button "Island 120×80 cm" [ref=e155] [cursor=pointer]:
+              - generic [ref=e158]: Island
+              - generic [ref=e159]: 120×80 cm
+          - listitem [ref=e160]:
+            - button "Kitchen Sink 80×55 cm" [ref=e161] [cursor=pointer]:
+              - generic [ref=e164]: Kitchen Sink
+              - generic [ref=e165]: 80×55 cm
+          - listitem [ref=e166]:
+            - button "Stove / Hob 60×60 cm" [ref=e167] [cursor=pointer]:
+              - generic [ref=e170]: Stove / Hob
+              - generic [ref=e171]: 60×60 cm
+          - listitem [ref=e172]:
+            - button "Refrigerator 70×70 cm" [ref=e173] [cursor=pointer]:
+              - generic [ref=e176]: Refrigerator
+              - generic [ref=e177]: 70×70 cm
+          - listitem [ref=e178]:
+            - button "Chimney 60×40 cm" [ref=e179] [cursor=pointer]:
+              - generic [ref=e182]: Chimney
+              - generic [ref=e183]: 60×40 cm
+          - listitem [ref=e184]:
+            - button "WC 40×60 cm" [ref=e185] [cursor=pointer]:
+              - generic [ref=e188]: WC
+              - generic [ref=e189]: 40×60 cm
+          - listitem [ref=e190]:
+            - button "Wash Basin 50×40 cm" [ref=e191] [cursor=pointer]:
+              - generic [ref=e194]: Wash Basin
+              - generic [ref=e195]: 50×40 cm
+          - listitem [ref=e196]:
+            - button "Vanity 90×50 cm" [ref=e197] [cursor=pointer]:
+              - generic [ref=e200]: Vanity
+              - generic [ref=e201]: 90×50 cm
+          - listitem [ref=e202]:
+            - button "Shower 90×90 cm" [ref=e203] [cursor=pointer]:
+              - generic [ref=e206]: Shower
+              - generic [ref=e207]: 90×90 cm
+          - listitem [ref=e208]:
+            - button "Bathtub 170×75 cm" [ref=e209] [cursor=pointer]:
+              - generic [ref=e212]: Bathtub
+              - generic [ref=e213]: 170×75 cm
+          - listitem [ref=e214]:
+            - button "Mirror 60×10 cm" [ref=e215] [cursor=pointer]:
+              - generic [ref=e218]: Mirror
+              - generic [ref=e219]: 60×10 cm
+          - listitem [ref=e220]:
+            - button "Towel Rail 60×10 cm" [ref=e221] [cursor=pointer]:
+              - generic [ref=e224]: Towel Rail
+              - generic [ref=e225]: 60×10 cm
+          - listitem [ref=e226]:
+            - button "Geyser 45×30 cm" [ref=e227] [cursor=pointer]:
+              - generic [ref=e230]: Geyser
+              - generic [ref=e231]: 45×30 cm
+          - listitem [ref=e232]:
+            - button "Washing Machine 60×60 cm" [ref=e233] [cursor=pointer]:
+              - generic [ref=e236]: Washing Machine
+              - generic [ref=e237]: 60×60 cm
+          - listitem [ref=e238]:
+            - button "Desk 120×60 cm" [ref=e239] [cursor=pointer]:
+              - generic [ref=e242]: Desk
+              - generic [ref=e243]: 120×60 cm
+          - listitem [ref=e244]:
+            - button "Staircase 100×250 cm" [ref=e245] [cursor=pointer]:
+              - generic [ref=e248]: Staircase
+              - generic [ref=e249]: 100×250 cm
+          - listitem [ref=e250]:
+            - button "Pooja Unit 90×45 cm" [ref=e251] [cursor=pointer]:
+              - generic [ref=e254]: Pooja Unit
+              - generic [ref=e255]: 90×45 cm
+    - main [ref=e256]:
+      - generic [ref=e257]:
+        - generic: 100% · grid 30cm
+    - complementary [ref=e261]:
+      - generic [ref=e262]:
+        - paragraph [ref=e263]: Plan Stats
+        - generic [ref=e264]:
+          - generic [ref=e265]:
+            - generic [ref=e266]: Walls
+            - generic [ref=e267]: "0"
+          - generic [ref=e268]:
+            - generic [ref=e269]: Openings
+            - generic [ref=e270]: "0"
+          - generic [ref=e271]:
+            - generic [ref=e272]: Rooms
+            - generic [ref=e273]: "0"
+          - generic [ref=e274]:
+            - generic [ref=e275]: Furniture
+            - generic [ref=e276]: "0"
+      - generic [ref=e277]:
+        - paragraph [ref=e278]: Rooms
+        - paragraph [ref=e279]: Draw a closed wall loop
+      - generic [ref=e280]:
+        - paragraph [ref=e281]: Selection
+        - paragraph [ref=e283]: Click to select an element

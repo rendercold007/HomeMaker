@@ -1,9 +1,47 @@
-import { usePlan, useSelection } from '../../state/store';
+import { useEffect, useState } from 'react';
+import { usePlan, useSelection, useActiveFloor } from '../../state/store';
 import { formatArea, formatLength } from '../../lib/units';
 import { distance } from '../../model/geometry';
 import { getFurnitureDef } from '../../model/furniture';
+import { setRoomName, setRoomType } from '../../model/planEdits';
+import { ROOM_TYPES, roomTypeColor } from '../../model/roomTypes';
+import type { ID, Room, RoomType } from '../../model/types';
 
-const DOT_COLORS = ['#818cf8','#34d399','#fbbf24','#f87171','#a78bfa','#fb923c','#38bdf8','#4ade80'];
+function RoomEditor({ room, floorId }: { room: Room; floorId: ID }) {
+  const { plan, commit } = usePlan();
+  const [name, setName] = useState(room.name);
+  // Resync the draft when a different room is selected, or after undo/redo.
+  useEffect(() => setName(room.name), [room.id, room.name]);
+
+  const commitName = () => {
+    const v = name.trim() || 'Room';
+    if (v !== room.name) commit(setRoomName(plan, floorId, room.id, v));
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-indigo-400">Room</p>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={commitName}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        placeholder="Room name"
+        className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+      />
+      <select
+        value={room.type}
+        onChange={(e) => commit(setRoomType(plan, floorId, room.id, e.target.value as RoomType))}
+        className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 focus:border-indigo-500 focus:outline-none"
+      >
+        {ROOM_TYPES.map((t) => (
+          <option key={t.type} value={t.type} className="bg-slate-900">{t.label}</option>
+        ))}
+      </select>
+      <p className="text-[10px] text-slate-600">{formatArea(room.areaCm2)}</p>
+    </div>
+  );
+}
 
 function StatRow({ label, value }: { label: string; value: string | number }) {
   return (
@@ -16,8 +54,9 @@ function StatRow({ label, value }: { label: string; value: string | number }) {
 
 export function InfoPanel() {
   const { plan } = usePlan();
-  const { selection } = useSelection();
-  const floor = plan.floors[0]!;
+  const { selection, select } = useSelection();
+  const { activeFloorId } = useActiveFloor();
+  const floor = plan.floors.find((f) => f.id === activeFloorId) ?? plan.floors[0]!;
 
   const selectedWall =
     selection?.kind === 'wall' ? floor.walls.find((w) => w.id === selection.id) : undefined;
@@ -35,6 +74,10 @@ export function InfoPanel() {
 
   function selectionContent() {
     if (!selection) return <p className="text-xs text-slate-600 italic">Click to select an element</p>;
+    if (selection.kind === 'room') {
+      const room = floor.rooms.find((r) => r.id === selection.id);
+      if (room) return <RoomEditor key={room.id} room={room} floorId={floor.id} />;
+    }
     if (selection.kind === 'wall' && selectedWall) return (
       <div className="space-y-0.5">
         <p className="text-xs font-semibold text-indigo-400">Wall segment</p>
@@ -88,13 +131,23 @@ export function InfoPanel() {
           <p className="text-xs italic text-slate-600">Draw a closed wall loop</p>
         ) : (
           <ul className="space-y-1">
-            {floor.rooms.map((r, i) => (
-              <li key={r.id} className="flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                <span className="h-2 w-2 flex-none rounded-full" style={{ background: DOT_COLORS[i % DOT_COLORS.length] }} />
-                <span className="flex-1 truncate text-xs text-slate-300">{r.name}</span>
-                <span className="text-[10px] font-medium text-slate-500">{formatArea(r.areaCm2)}</span>
-              </li>
-            ))}
+            {floor.rooms.map((r) => {
+              const isSel = selection?.kind === 'room' && selection.id === r.id;
+              return (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => select({ kind: 'room', id: r.id })}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${isSel ? 'ring-1 ring-indigo-500/50' : 'hover:bg-white/5'}`}
+                    style={{ background: isSel ? 'rgba(37,99,235,0.12)' : 'rgba(255,255,255,0.04)' }}
+                  >
+                    <span className="h-2 w-2 flex-none rounded-full" style={{ background: roomTypeColor(r.type) }} />
+                    <span className="flex-1 truncate text-xs text-slate-300">{r.name}</span>
+                    <span className="text-[10px] font-medium text-slate-500">{formatArea(r.areaCm2)}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

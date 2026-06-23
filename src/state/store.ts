@@ -38,7 +38,7 @@ export interface GridSettings {
   snap: boolean;
 }
 
-export type SelectionKind = 'wall' | 'point' | 'opening' | 'furniture';
+export type SelectionKind = 'wall' | 'point' | 'opening' | 'furniture' | 'room';
 
 export interface Selection {
   kind: SelectionKind;
@@ -55,6 +55,8 @@ interface StoreState {
   past: Plan[];
   present: Plan;
   future: Plan[];
+  /** The floor 2D editing currently targets. */
+  activeFloorId: ID;
   // Tool + grid.
   tool: Tool;
   grid: GridSettings;
@@ -67,6 +69,7 @@ interface StoreState {
   undo: () => void;
   redo: () => void;
   reset: (plan: Plan) => void;
+  setActiveFloor: (id: ID) => void;
 
   // Tool actions.
   setTool: (t: Tool) => void;
@@ -78,10 +81,13 @@ interface StoreState {
   clearSelection: () => void;
 }
 
+const initialPlan = createInitialPlan();
+
 export const useStore = create<StoreState>((set) => ({
   past: [],
-  present: createInitialPlan(),
+  present: initialPlan,
   future: [],
+  activeFloorId: initialPlan.floors[0]!.id,
   tool: 'select',
   grid: DEFAULT_GRID,
   activeFurnitureType: null,
@@ -118,7 +124,9 @@ export const useStore = create<StoreState>((set) => ({
       };
     }),
 
-  reset: (plan) => set({ past: [], present: plan, future: [] }),
+  reset: (plan) =>
+    set({ past: [], present: plan, future: [], activeFloorId: plan.floors[0]!.id, selection: null }),
+  setActiveFloor: (id) => set({ activeFloorId: id, selection: null }),
 
   setTool: (tool) => set({ tool }),
   setGrid: (next) => set((s) => ({ grid: { ...s.grid, ...next } })),
@@ -200,4 +208,19 @@ export function useSelection(): SelectionSlice {
     [selection],
   );
   return { selection, select, clear, isSelected };
+}
+
+export interface ActiveFloorSlice {
+  activeFloorId: ID;
+  setActiveFloor: (id: ID) => void;
+}
+
+/** The floor that 2D editing targets, and a setter to switch floors. */
+export function useActiveFloor(): ActiveFloorSlice {
+  return useStore(
+    useShallow((s) => ({
+      activeFloorId: s.activeFloorId,
+      setActiveFloor: s.setActiveFloor,
+    })),
+  );
 }

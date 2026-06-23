@@ -12,6 +12,9 @@ import { formatArea } from '../../lib/units';
 interface RoomsLayerProps {
   floor: Floor;
   invZoom: number;
+  interactive: boolean;
+  selectedRoomId: ID | null;
+  onSelectRoom: (id: ID) => void;
 }
 
 /** Order a room's walls into a ring of points for filling. */
@@ -54,9 +57,15 @@ function centroid(pts: Vec2[]): Vec2 {
   return { x: c.x / pts.length, y: c.y / pts.length };
 }
 
-export function RoomsLayer({ floor, invZoom }: RoomsLayerProps) {
+export function RoomsLayer({
+  floor,
+  invZoom,
+  interactive,
+  selectedRoomId,
+  onSelectRoom,
+}: RoomsLayerProps) {
   return (
-    <Group listening={false}>
+    <Group>
       {floor.rooms.map((room) => {
         const ring = roomRing(room, floor);
         if (ring.length < 3) return null;
@@ -64,13 +73,18 @@ export function RoomsLayer({ floor, invZoom }: RoomsLayerProps) {
         const c = centroid(ring);
         const area = Math.abs(signedPolygonArea(ring));
         const fontSize = 14 * invZoom;
+        const selected = room.id === selectedRoomId;
         return (
           <Group key={room.id}>
             <Line
               points={flat}
               closed
-              fill="rgba(59, 130, 246, 0.08)"
-              listening={false}
+              fill={selected ? 'rgba(37, 99, 235, 0.20)' : 'rgba(59, 130, 246, 0.08)'}
+              stroke={selected ? '#2563eb' : undefined}
+              strokeWidth={selected ? 1.5 * invZoom : 0}
+              listening={interactive}
+              onClick={interactive ? (e) => { e.cancelBubble = true; onSelectRoom(room.id); } : undefined}
+              onTap={interactive ? (e) => { e.cancelBubble = true; onSelectRoom(room.id); } : undefined}
             />
             <Text
               x={c.x}

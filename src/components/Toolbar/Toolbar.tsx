@@ -1,4 +1,5 @@
 import { usePlan, useTool, type Tool } from '../../state/store';
+import { FloorControls } from './FloorControls';
 
 const TOOLS: { id: Tool; label: string; hint: string; icon: React.ReactNode }[] = [
   {
@@ -108,6 +109,12 @@ export function Toolbar() {
           <option key={s} value={s} className="bg-slate-900">{s} cm</option>
         ))}
       </select>
+
+      {/* Floor switcher */}
+      <div className="ml-auto flex items-center gap-1">
+        <div className="h-5 w-px bg-white/10" />
+        <FloorControls />
+      </div>
     </div>
   );
 }

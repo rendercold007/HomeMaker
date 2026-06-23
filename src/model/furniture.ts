@@ -54,6 +54,7 @@ export const FURNITURE_CATALOG: readonly FurnitureDef[] = [
 
   // Study & misc
   { type: 'desk',            label: 'Desk',          widthCm: 120, heightCm:  60, color: '#e0e7ff' },
+  { type: 'staircase',       label: 'Staircase',     widthCm: 100, heightCm: 250, color: '#d6c3a3' },
   { type: 'pooja_unit',      label: 'Pooja Unit',    widthCm:  90, heightCm:  45, color: '#fef3c7' },
 ];
 

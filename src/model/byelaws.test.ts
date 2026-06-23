@@ -34,7 +34,7 @@ function makeFloor(
 }
 
 function makeRoom(id: string, areaCm2: number): Room {
-  return { id, wallIds: [], name: id, areaCm2 };
+  return { id, wallIds: [], name: id, type: 'other', areaCm2 };
 }
 
 function cleanPlan(floors: Floor[], plot?: Plot): Plan {

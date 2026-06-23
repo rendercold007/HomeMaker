@@ -23,6 +23,7 @@ import type { Floor, Opening, Furniture } from '../../model/types';
 import { getFurnitureDef } from '../../model/furniture';
 import { DEFAULT_WALL_HEIGHT } from '../../model/planEdits';
 import { computeWallQuads, type WallQuad } from '../../model/miter';
+import { roomTypeColor } from '../../model/roomTypes';
 
 extend({ THREE });
 
@@ -32,17 +33,6 @@ const DOOR_H = 2.1;
 const SILL_H = 0.9;
 const LINTEL_H = 2.1;
 
-// Muted, warm interior palette (not vivid pastels)
-const ROOM_FLOOR_COLORS = [
-  '#c8b89a', // warm oak
-  '#b5c4b1', // sage
-  '#c4b5a0', // sandstone
-  '#adb8c0', // cool stone
-  '#c9bfb0', // linen
-  '#b8c0b5', // eucalyptus
-  '#c0b4a8', // terracotta blush
-  '#b2bec3', // slate
-];
 
 // ── Procedural wall texture (canvas → texture) ─────────────────────────────
 // Creates a subtle plaster-like roughness without needing external asset files.
@@ -214,10 +204,9 @@ function WallMesh({ wall, quad, pointById, openingsOnWall, wallTex }: {
 
 // ── Room floor slab ─────────────────────────────────────────────────────────
 
-function RoomSlab({ room, floor, colorIndex }: {
+function RoomSlab({ room, floor }: {
   room: Floor['rooms'][number];
   floor: Floor;
-  colorIndex: number;
 }) {
   const pointById = useMemo(() => new Map(floor.points.map(p => [p.id, p])), [floor.points]);
   const wallById  = useMemo(() => new Map(floor.walls.map(w => [w.id, w])), [floor.walls]);
@@ -245,7 +234,7 @@ function RoomSlab({ room, floor, colorIndex }: {
   for (let i = 1; i < sorted.length; i++) shape.lineTo(sorted[i]!.x * CM, sorted[i]!.y * CM);
   shape.closePath();
 
-  const color = ROOM_FLOOR_COLORS[colorIndex % ROOM_FLOOR_COLORS.length];
+  const color = roomTypeColor(room.type);
 
   return (
     <group>
@@ -869,6 +858,27 @@ function FurnitureMesh({ item }: { item: Furniture }) {
       );
     }
 
+    case 'staircase': {
+      const n = 12;
+      const stepH = WALL_H / n;   // rises one full storey
+      const stepRun = d / n;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {Array.from({ length: n }, (_, i) => (
+            <mesh
+              key={i}
+              position={[0, ((i + 1) * stepH) / 2, -d / 2 + (i + 0.5) * stepRun]}
+              castShadow
+              receiveShadow
+            >
+              <boxGeometry args={[w, (i + 1) * stepH, stepRun]} />
+              <meshStandardMaterial color="#b89878" roughness={0.7} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
     default: {
       // Generic box fallback for unknown types
       return (
@@ -883,44 +893,38 @@ function FurnitureMesh({ item }: { item: Furniture }) {
 
 // ── Camera initialiser ──────────────────────────────────────────────────────
 
-function CameraRig({ cx, cz, w, d }: { cx: number; cz: number; w: number; d: number }) {
+function CameraRig({ cx, cz, w, d, buildingH }: {
+  cx: number; cz: number; w: number; d: number; buildingH: number;
+}) {
   const { camera } = useThree();
   const done = useRef(false);
   if (!done.current) {
     const dist = Math.max(w, d);
-    camera.position.set(cx - dist * 0.9, dist * 0.8, cz + dist * 1.0);
-    camera.lookAt(cx, 0, cz);
+    // Lower, pulled-back camera looking at mid-building height so taller
+    // (multi-storey) buildings read as an elevation rather than a top-down box.
+    const camH = Math.max(dist * 0.55, buildingH * 1.05);
+    camera.position.set(cx - dist * 1.0, camH, cz + dist * 1.2);
+    camera.lookAt(cx, buildingH * 0.45, cz);
     done.current = true;
   }
   return null;
 }
 
-// ── Scene ───────────────────────────────────────────────────────────────────
+// ── Per-floor group ──────────────────────────────────────────────────────────
 
-function Scene() {
-  const { plan } = usePlan();
-  const floor = plan.floors[0];
-
-  const wallTex  = useMemo(() => makePlasterTexture(),  []);
-
-  if (!floor) return null;
-
-  const { widthCm, depthCm } = plan.plot;
-  const w  = widthCm * CM;
-  const d  = depthCm * CM;
-  const cx = w / 2;
-  const cz = d / 2;
-
+function FloorGroup({ floor, yOffset, wallTex }: {
+  floor: Floor;
+  yOffset: number;
+  wallTex: THREE.CanvasTexture;
+}) {
   const pointById = useMemo(
     () => new Map(floor.points.map(p => [p.id, p])),
     [floor.points],
   );
-
   const wallQuads = useMemo(
     () => computeWallQuads(floor.points, floor.walls),
     [floor.points, floor.walls],
   );
-
   const openingsByWall = useMemo(() => {
     const map = new Map<string, Opening[]>();
     for (const op of floor.openings) {
@@ -931,14 +935,54 @@ function Scene() {
     return map;
   }, [floor.openings]);
 
-  // Ground is sized to the building's actual extent (the bounding box of all
-  // wall points, unioned with the plot), since walls can be drawn well outside
-  // the default plot rectangle — otherwise rooms past the plot edge float.
+  return (
+    <group position={[0, yOffset, 0]}>
+      {floor.rooms.map((room) => (
+        <RoomSlab key={room.id} room={room} floor={floor} />
+      ))}
+      {floor.walls.map((wall) => (
+        <WallMesh
+          key={wall.id}
+          wall={wall}
+          quad={wallQuads.get(wall.id)}
+          pointById={pointById}
+          openingsOnWall={openingsByWall.get(wall.id) ?? []}
+          wallTex={wallTex}
+        />
+      ))}
+      {floor.furniture.map((item) => (
+        <FurnitureMesh key={item.id} item={item} />
+      ))}
+    </group>
+  );
+}
+
+// ── Scene ───────────────────────────────────────────────────────────────────
+
+function Scene() {
+  const { plan } = usePlan();
+  const wallTex = useMemo(() => makePlasterTexture(), []);
+
+  const floors = plan.floors;
+  if (floors.length === 0) return null;
+
+  const { widthCm, depthCm } = plan.plot;
+  const w  = widthCm * CM;
+  const d  = depthCm * CM;
+  const cx = w / 2;
+  const cz = d / 2;
+  const maxLevel = floors.reduce((m, f) => Math.max(m, f.level), 0);
+
+  // Ground is sized to the whole building's extent (the bounding box of every
+  // floor's points, unioned with the plot), since walls can be drawn well
+  // outside the default plot rectangle.
   const GROUND_MARGIN = 3; // metres of ground around the structure
   let minX = 0, maxX = widthCm, minY = 0, maxY = depthCm;
-  for (const p of floor.points) {
-    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  for (const f of floors) {
+    for (const p of f.points) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
   }
   const groundCx = ((minX + maxX) / 2) * CM;
   const groundCz = ((minY + maxY) / 2) * CM;
@@ -947,7 +991,7 @@ function Scene() {
 
   return (
     <>
-      <CameraRig cx={cx} cz={cz} w={w} d={d} />
+      <CameraRig cx={cx} cz={cz} w={w} d={d} buildingH={(maxLevel + 1) * WALL_H} />
 
       {/* HDR environment for realistic ambient light + reflections */}
       <Environment preset="apartment" background={false} />
@@ -957,7 +1001,7 @@ function Scene() {
 
       {/* Key light — warm sun coming through windows */}
       <directionalLight
-        position={[cx + w * 0.6, 5, cz - d * 0.4]}
+        position={[cx + w * 0.6, 5 + maxLevel * WALL_H, cz - d * 0.4]}
         intensity={1.8}
         color="#fff8e8"
         castShadow
@@ -978,7 +1022,7 @@ function Scene() {
       />
 
       {/* Ceiling bounce */}
-      <pointLight position={[cx, WALL_H - 0.1, cz]} intensity={0.6} color="#fff5e0" distance={Math.max(w, d) * 2} />
+      <pointLight position={[cx, (maxLevel + 0.9) * WALL_H, cz]} intensity={0.6} color="#fff5e0" distance={Math.max(w, d) * 2} />
 
       {/* Ground plane — covers the whole building footprint */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[groundCx, -0.005, groundCz]} receiveShadow>
@@ -997,29 +1041,12 @@ function Scene() {
         color="#1a1008"
       />
 
-      {/* Room floors */}
-      {floor.rooms.map((room, i) => (
-        <RoomSlab key={room.id} room={room} floor={floor} colorIndex={i} />
+      {/* Floors, stacked at their level height */}
+      {floors.map((f) => (
+        <FloorGroup key={f.id} floor={f} yOffset={f.level * WALL_H} wallTex={wallTex} />
       ))}
 
-      {/* Walls */}
-      {floor.walls.map(wall => (
-        <WallMesh
-          key={wall.id}
-          wall={wall}
-          quad={wallQuads.get(wall.id)}
-          pointById={pointById}
-          openingsOnWall={openingsByWall.get(wall.id) ?? []}
-          wallTex={wallTex}
-        />
-      ))}
-
-      {/* Furniture */}
-      {floor.furniture.map(item => (
-        <FurnitureMesh key={item.id} item={item} />
-      ))}
-
-      <OrbitControls makeDefault target={[cx, WALL_H * 0.35, cz]} minDistance={1} maxDistance={50} />
+      <OrbitControls makeDefault target={[cx, (maxLevel + 1) * WALL_H * 0.4, cz]} minDistance={1} maxDistance={80} />
     </>
   );
 }

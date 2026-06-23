@@ -37,7 +37,7 @@ import {
   DEFAULT_DOOR_WIDTH,
   DEFAULT_WINDOW_WIDTH,
 } from '../../model/planEdits';
-import { usePlan, useTool, useSelection } from '../../state/store';
+import { usePlan, useTool, useSelection, useActiveFloor } from '../../state/store';
 
 import { useElementSize } from './useElementSize';
 import { setStageRef } from '../../lib/stageRef';
@@ -64,8 +64,9 @@ export function CanvasStage() {
   const { plan, commit, undo, redo } = usePlan();
   const { tool, setTool, grid, activeFurnitureType } = useTool();
   const { selection, select, clear } = useSelection();
+  const { activeFloorId } = useActiveFloor();
 
-  const floor = plan.floors[0]!;
+  const floor = plan.floors.find((f) => f.id === activeFloorId) ?? plan.floors[0]!;
   const floorId = floor.id;
 
   const [containerRef, size] = useElementSize<HTMLDivElement>();
@@ -312,6 +313,10 @@ export function CanvasStage() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Don't hijack typing in form fields (e.g. the room name input).
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
       const mod = e.ctrlKey || e.metaKey;
 
       if (e.key === ' ') { setSpaceDown(true); return; }
@@ -406,7 +411,13 @@ export function CanvasStage() {
             {grid.visible && (
               <GridLayer min={worldMin} max={worldMax} gridCm={grid.sizeCm} invZoom={invZoom} />
             )}
-            <RoomsLayer floor={floor} invZoom={invZoom} />
+            <RoomsLayer
+              floor={floor}
+              invZoom={invZoom}
+              interactive={tool === 'select'}
+              selectedRoomId={selection?.kind === 'room' ? selection.id : null}
+              onSelectRoom={(id) => select({ kind: 'room', id })}
+            />
             <WallsLayer
               floor={floor}
               override={override}

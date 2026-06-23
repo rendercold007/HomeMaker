@@ -8,7 +8,7 @@
  * These operate on a single "active" floor identified by id; the rest of the
  * plan is passed through untouched.
  */
-import type { Floor, Furniture, ID, Opening, Plan, Point } from './types';
+import type { Floor, Furniture, ID, Opening, Plan, Point, Room, RoomType } from './types';
 import { detectRooms } from './roomDetect';
 import { newId as defaultNewId } from './ids';
 
@@ -34,15 +34,57 @@ function getFloor(plan: Plan, floorId: ID): Floor {
   return f;
 }
 
+/**
+ * Carry user-authored `name`/`type` from the previous rooms onto freshly
+ * detected ones. A room's id is its sorted wall set, so an unchanged boundary
+ * (e.g. dragging a vertex) matches exactly; when walls are added/removed we fall
+ * back to the previous room that shares the most boundary walls.
+ */
+function carryRoomMeta(oldRooms: readonly Room[], newRooms: Room[]): Room[] {
+  if (oldRooms.length === 0) return newRooms;
+  const oldById = new Map(oldRooms.map((r) => [r.id, r]));
+  return newRooms.map((room) => {
+    const exact = oldById.get(room.id);
+    if (exact) return { ...room, name: exact.name, type: exact.type };
+
+    const wallSet = new Set(room.wallIds);
+    let best: Room | undefined;
+    let bestShared = 0;
+    for (const old of oldRooms) {
+      let shared = 0;
+      for (const wid of old.wallIds) if (wallSet.has(wid)) shared++;
+      if (shared > bestShared) {
+        bestShared = shared;
+        best = old;
+      }
+    }
+    return best && bestShared > 0 ? { ...room, name: best.name, type: best.type } : room;
+  });
+}
+
 /** Recompute derived rooms for every floor. Call after any wall-graph change. */
 export function recomputeRooms(plan: Plan): Plan {
   return {
     ...plan,
     floors: plan.floors.map((f) => ({
       ...f,
-      rooms: detectRooms(f.points, f.walls),
+      rooms: carryRoomMeta(f.rooms, detectRooms(f.points, f.walls)),
     })),
   };
+}
+
+/** Set a room's display name. Does not recompute geometry. */
+export function setRoomName(plan: Plan, floorId: ID, roomId: ID, name: string): Plan {
+  const floor = getFloor(plan, floorId);
+  const rooms = floor.rooms.map((r) => (r.id === roomId ? { ...r, name } : r));
+  return withFloor(plan, floorId, { ...floor, rooms });
+}
+
+/** Set a room's functional type (drives 3D floor color). */
+export function setRoomType(plan: Plan, floorId: ID, roomId: ID, type: RoomType): Plan {
+  const floor = getFloor(plan, floorId);
+  const rooms = floor.rooms.map((r) => (r.id === roomId ? { ...r, type } : r));
+  return withFloor(plan, floorId, { ...floor, rooms });
 }
 
 /** Add a point to a floor. Returns the new plan and the created point id. */
@@ -276,4 +318,25 @@ export function createInitialPlan(newId: IdGen = defaultNewId): Plan {
     },
     floors: [createEmptyFloor(0, newId)],
   };
+}
+
+/**
+ * Add an empty floor one level above the current highest. Returns the new plan
+ * and the new floor's id (so the caller can switch the active floor to it).
+ */
+export function addFloor(
+  plan: Plan,
+  newId: IdGen = defaultNewId,
+): { plan: Plan; floorId: ID } {
+  const maxLevel = plan.floors.reduce((m, f) => Math.max(m, f.level), -1);
+  const floor = createEmptyFloor(maxLevel + 1, newId);
+  return { plan: { ...plan, floors: [...plan.floors, floor] }, floorId: floor.id };
+}
+
+/** Remove a floor. No-op if it's the only floor (a plan always has ≥1 floor). */
+export function deleteFloor(plan: Plan, floorId: ID): Plan {
+  if (plan.floors.length <= 1) return plan;
+  const floors = plan.floors.filter((f) => f.id !== floorId);
+  if (floors.length === plan.floors.length) return plan;
+  return { ...plan, floors };
 }

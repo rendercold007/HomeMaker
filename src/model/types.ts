@@ -44,14 +44,29 @@ export interface Opening {
   width: number;
 }
 
+/** A room's functional type. Drives 3D floor colors and labelling. */
+export type RoomType =
+  | 'living'
+  | 'bedroom'
+  | 'kitchen'
+  | 'bathroom'
+  | 'dining'
+  | 'study'
+  | 'utility'
+  | 'pooja'
+  | 'parking'
+  | 'other';
+
 /**
- * A room — DERIVED, not authored directly. Produced by cycle detection over
- * the wall graph.
+ * A room — its geometry is DERIVED (cycle detection over the wall graph), but
+ * `name` and `type` are user-authored and carried across recomputation by the
+ * room's stable id (its sorted wall set). See planEdits.recomputeRooms.
  */
 export interface Room {
   id: ID;
   wallIds: ID[];
   name: string;
+  type: RoomType;
   areaCm2: number;
 }
 
