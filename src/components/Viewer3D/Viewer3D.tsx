@@ -22,6 +22,7 @@ import { usePlan } from '../../state/store';
 import type { Floor, Opening, Furniture } from '../../model/types';
 import { getFurnitureDef } from '../../model/furniture';
 import { DEFAULT_WALL_HEIGHT } from '../../model/planEdits';
+import { computeWallQuads, type WallQuad } from '../../model/miter';
 
 extend({ THREE });
 
@@ -99,15 +100,16 @@ function buildSegments(wallLenCm: number, openings: Opening[], wallH: number): S
 
 // ── Wall mesh ───────────────────────────────────────────────────────────────
 
-function WallMesh({ wall, pointById, openingsOnWall, wallTex }: {
+function WallMesh({ wall, quad, pointById, openingsOnWall, wallTex }: {
   wall: Floor['walls'][number];
+  quad: WallQuad | undefined;
   pointById: Map<string, Floor['points'][number]>;
   openingsOnWall: Opening[];
   wallTex: THREE.CanvasTexture;
 }) {
   const pa = pointById.get(wall.a);
   const pb = pointById.get(wall.b);
-  if (!pa || !pb) return null;
+  if (!pa || !pb || !quad) return null;
 
   const wallLenCm = Math.hypot(pb.x - pa.x, pb.y - pa.y);
   const angle     = Math.atan2(pb.y - pa.y, pb.x - pa.x);
@@ -119,25 +121,48 @@ function WallMesh({ wall, pointById, openingsOnWall, wallTex }: {
   const paNonNull = pa!;
   const pbNonNull = pb!;
 
-  function segCenter(seg: Seg): [number, number, number] {
-    const frac = (seg.offset + seg.length / 2) / wallLenCm;
-    return [
-      (paNonNull.x + frac * (pbNonNull.x - paNonNull.x)) * CM,
-      (seg.yMin + seg.yMax) / 2,
-      (paNonNull.y + frac * (pbNonNull.y - paNonNull.y)) * CM,
-    ];
-  }
+  // Plan-space edge point at distance d (cm) along the wall, on the given side.
+  // Wall ends use the mitered corner; interior cuts (at openings) stay square —
+  // identical to the 2D layer, so 2D and 3D corners agree.
+  const [leftA, leftB, rightB, rightA] = quad.corners;
+  const dirx = (pbNonNull.x - paNonNull.x) / (wallLenCm || 1);
+  const diry = (pbNonNull.y - paNonNull.y) / (wallLenCm || 1);
+  const nLx = -diry;
+  const nLy = dirx;
+  const halfT = wall.thickness / 2;
+  const edge = (d: number, side: 1 | -1) => {
+    if (d <= 0) return side === 1 ? leftA : rightA;
+    if (d >= wallLenCm) return side === 1 ? leftB : rightB;
+    return {
+      x: paNonNull.x + dirx * d + side * nLx * halfT,
+      y: paNonNull.y + diry * d + side * nLy * halfT,
+    };
+  };
+
+  // Footprint of a segment as a THREE.Shape (cm → m). Plan y maps to world z;
+  // the mesh is rotated -90° about X so the shape extrudes upward into a prism.
+  const segmentShape = (d0: number, d1: number): THREE.Shape => {
+    const pts = [edge(d0, 1), edge(d1, 1), edge(d1, -1), edge(d0, -1)];
+    const shape = new THREE.Shape();
+    shape.moveTo(pts[0]!.x * CM, -pts[0]!.y * CM);
+    for (let k = 1; k < pts.length; k++) shape.lineTo(pts[k]!.x * CM, -pts[k]!.y * CM);
+    shape.closePath();
+    return shape;
+  };
 
   return (
     <group>
       {segs.map((seg, i) => (
-        <mesh key={i} position={segCenter(seg)} rotation={[0, -angle, 0]} castShadow receiveShadow>
-          <boxGeometry args={[seg.length * CM, seg.yMax - seg.yMin, t]} />
+        <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, seg.yMin, 0]} castShadow receiveShadow>
+          <extrudeGeometry
+            args={[segmentShape(seg.offset, seg.offset + seg.length), { depth: seg.yMax - seg.yMin, bevelEnabled: false }]}
+          />
           <meshStandardMaterial
             map={wallTex}
             color="#ddd8d0"
             roughness={0.92}
             metalness={0.0}
+            side={THREE.DoubleSide}
           />
         </mesh>
       ))}
@@ -891,6 +916,11 @@ function Scene() {
     [floor.points],
   );
 
+  const wallQuads = useMemo(
+    () => computeWallQuads(floor.points, floor.walls),
+    [floor.points, floor.walls],
+  );
+
   const openingsByWall = useMemo(() => {
     const map = new Map<string, Opening[]>();
     for (const op of floor.openings) {
@@ -977,6 +1007,7 @@ function Scene() {
         <WallMesh
           key={wall.id}
           wall={wall}
+          quad={wallQuads.get(wall.id)}
           pointById={pointById}
           openingsOnWall={openingsByWall.get(wall.id) ?? []}
           wallTex={wallTex}
