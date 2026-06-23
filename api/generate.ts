@@ -6,15 +6,15 @@ import { extractJson } from './_shared.js';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'DEEPSEEK_API_KEY is not configured.' });
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY is not configured.' });
 
   try {
     const body = req.body as { prompt: string; plot: Parameters<typeof buildUserPrompt>[0]['plot']; vastu: Parameters<typeof buildUserPrompt>[0]['vastu'] };
     const client = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
 
     const completion = await client.chat.completions.create({
-      model: process.env.DEEPSEEK_MODEL ?? 'deepseek/deepseek-chat',
+      model: process.env.GEMINI_MODEL ?? 'google/gemini-3.1-flash-image',
       max_tokens: 8000,
       temperature: 0.3,
       messages: [
