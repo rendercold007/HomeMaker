@@ -18,14 +18,15 @@ import {
 import { EffectComposer, SSAO, SMAA, ToneMapping } from '@react-three/postprocessing';
 import { ToneMappingMode } from 'postprocessing';
 import * as THREE from 'three';
-import { usePlan } from '../../state/PlanContext';
+import { usePlan } from '../../state/store';
 import type { Floor, Opening, Furniture } from '../../model/types';
 import { getFurnitureDef } from '../../model/furniture';
+import { DEFAULT_WALL_HEIGHT } from '../../model/planEdits';
 
 extend({ THREE });
 
 const CM     = 1 / 100;
-const WALL_H = 2.7;   // metres — ceiling height
+const WALL_H = DEFAULT_WALL_HEIGHT * CM;   // metres — default ceiling height
 const DOOR_H = 2.1;
 const SILL_H = 0.9;
 const LINTEL_H = 2.1;
@@ -68,51 +69,30 @@ function makePlasterTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-function makeCeilingTexture(): THREE.CanvasTexture {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#f5f2ee';
-  ctx.fillRect(0, 0, size, size);
-  // Subtle ceiling texture — very light grain
-  for (let i = 0; i < 2000; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const v = Math.floor(238 + Math.random() * 15).toString(16).padStart(2, '0');
-    ctx.fillStyle = `#${v}${v}${v}`;
-    ctx.fillRect(x, y, 1, 1);
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(3, 3);
-  return tex;
-}
-
 // ── Wall segment builder ────────────────────────────────────────────────────
 
 interface Seg { offset: number; length: number; yMin: number; yMax: number }
 
-function buildSegments(wallLenCm: number, openings: Opening[]): Seg[] {
+function buildSegments(wallLenCm: number, openings: Opening[], wallH: number): Seg[] {
   const sorted = [...openings].sort((a, b) => a.offset - b.offset);
   const segs: Seg[] = [];
   let cursor = 0;
 
   for (const op of sorted) {
     if (op.offset > cursor) {
-      segs.push({ offset: cursor, length: op.offset - cursor, yMin: 0, yMax: WALL_H });
+      segs.push({ offset: cursor, length: op.offset - cursor, yMin: 0, yMax: wallH });
     }
     if (op.kind === 'window') {
       segs.push({ offset: op.offset, length: op.width, yMin: 0,        yMax: SILL_H   });
-      segs.push({ offset: op.offset, length: op.width, yMin: LINTEL_H, yMax: WALL_H   });
+      segs.push({ offset: op.offset, length: op.width, yMin: LINTEL_H, yMax: wallH   });
     }
-    if (op.kind === 'door' && DOOR_H < WALL_H) {
-      segs.push({ offset: op.offset, length: op.width, yMin: DOOR_H, yMax: WALL_H });
+    if (op.kind === 'door' && DOOR_H < wallH) {
+      segs.push({ offset: op.offset, length: op.width, yMin: DOOR_H, yMax: wallH });
     }
     cursor = op.offset + op.width;
   }
   if (cursor < wallLenCm) {
-    segs.push({ offset: cursor, length: wallLenCm - cursor, yMin: 0, yMax: WALL_H });
+    segs.push({ offset: cursor, length: wallLenCm - cursor, yMin: 0, yMax: wallH });
   }
   return segs;
 }
@@ -131,7 +111,8 @@ function WallMesh({ wall, pointById, openingsOnWall, wallTex }: {
 
   const wallLenCm = Math.hypot(pb.x - pa.x, pb.y - pa.y);
   const angle     = Math.atan2(pb.y - pa.y, pb.x - pa.x);
-  const segs      = buildSegments(wallLenCm, openingsOnWall);
+  const wallH     = (wall.height ?? DEFAULT_WALL_HEIGHT) * CM;
+  const segs      = buildSegments(wallLenCm, openingsOnWall, wallH);
   const t         = wall.thickness * CM;
 
   // pa/pb are guaranteed non-null — early return guard is above
@@ -203,22 +184,6 @@ function WallMesh({ wall, pointById, openingsOnWall, wallTex }: {
         })
       )}
     </group>
-  );
-}
-
-// ── Ceiling slab ────────────────────────────────────────────────────────────
-
-function CeilingSlab({ plot, ceilTex }: {
-  plot: { widthCm: number; depthCm: number };
-  ceilTex: THREE.CanvasTexture;
-}) {
-  const w = plot.widthCm * CM;
-  const d = plot.depthCm * CM;
-  return (
-    <mesh position={[w / 2, WALL_H, d / 2]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[w, d]} />
-      <meshStandardMaterial map={ceilTex} color="#f0ece6" roughness={0.95} side={THREE.DoubleSide} />
-    </mesh>
   );
 }
 
@@ -516,6 +481,369 @@ function FurnitureMesh({ item }: { item: Furniture }) {
       );
     }
 
+    case 'fridge': {
+      const fh = 1.8;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          <mesh position={[0, fh / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, fh, d]} />
+            <meshStandardMaterial color="#d2d6da" roughness={0.35} metalness={0.55} />
+          </mesh>
+          {/* Door split */}
+          <mesh position={[0, fh * 0.5, d / 2 + 0.002]}>
+            <boxGeometry args={[w * 0.92, 0.02, 0.004]} />
+            <meshStandardMaterial color="#9aa0a6" />
+          </mesh>
+          {/* Handle */}
+          <mesh position={[w / 2 - 0.08, fh * 0.55, d / 2 + 0.03]} castShadow>
+            <boxGeometry args={[0.03, 0.5, 0.03]} />
+            <meshStandardMaterial color="#5a5e63" metalness={0.7} roughness={0.3} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'stove': {
+      const sh = 0.9;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Base cabinet */}
+          <mesh position={[0, sh / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, sh, d]} />
+            <meshStandardMaterial color="#e8dfd0" roughness={0.8} />
+          </mesh>
+          {/* Cooktop */}
+          <mesh position={[0, sh + 0.01, 0]} castShadow>
+            <boxGeometry args={[w * 0.96, 0.04, d * 0.96]} />
+            <meshStandardMaterial color="#2b2b2b" roughness={0.4} metalness={0.3} />
+          </mesh>
+          {/* Burners */}
+          {([[-1, -1], [1, -1], [-1, 1], [1, 1]] as const).map(([sx, sz], bi) => (
+            <mesh key={bi} position={[sx * w * 0.22, sh + 0.04, sz * d * 0.22]}>
+              <cylinderGeometry args={[w * 0.11, w * 0.11, 0.02, 16]} />
+              <meshStandardMaterial color="#3a3a3a" metalness={0.5} roughness={0.5} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case 'kitchen_sink': {
+      const kh = 0.9;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Cabinet */}
+          <mesh position={[0, (kh - 0.04) / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, kh - 0.04, d]} />
+            <meshStandardMaterial color="#e8dfd0" roughness={0.8} />
+          </mesh>
+          {/* Counter slab */}
+          <mesh position={[0, kh - 0.02, 0]} castShadow>
+            <boxGeometry args={[w, 0.04, d]} />
+            <meshStandardMaterial color="#8a8078" roughness={0.3} metalness={0.1} />
+          </mesh>
+          {/* Basin */}
+          <mesh position={[0, kh - 0.06, 0]}>
+            <boxGeometry args={[w * 0.55, 0.12, d * 0.6]} />
+            <meshStandardMaterial color="#c0c4c8" metalness={0.6} roughness={0.25} />
+          </mesh>
+          {/* Faucet */}
+          <mesh position={[0, kh + 0.14, -d * 0.28]} castShadow>
+            <cylinderGeometry args={[0.02, 0.02, 0.28, 8]} />
+            <meshStandardMaterial color="#9aa0a6" metalness={0.7} roughness={0.3} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'kitchen_island': {
+      const ih = 0.9;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          <mesh position={[0, (ih - 0.05) / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w * 0.9, ih - 0.05, d * 0.9]} />
+            <meshStandardMaterial color="#c8b89a" roughness={0.7} />
+          </mesh>
+          {/* Overhanging counter */}
+          <mesh position={[0, ih - 0.025, 0]} castShadow>
+            <boxGeometry args={[w, 0.05, d]} />
+            <meshStandardMaterial color="#7a7068" roughness={0.3} metalness={0.1} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'chimney': {
+      const base = 1.5;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Hood */}
+          <mesh position={[0, base, 0]} castShadow>
+            <boxGeometry args={[w, 0.18, d]} />
+            <meshStandardMaterial color="#c0c4c8" metalness={0.6} roughness={0.3} />
+          </mesh>
+          {/* Duct */}
+          <mesh position={[0, base + 0.4, -d * 0.1]} castShadow>
+            <boxGeometry args={[w * 0.35, 0.6, d * 0.4]} />
+            <meshStandardMaterial color="#b0b4b8" metalness={0.5} roughness={0.35} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'chair': {
+      const seatH = 0.45;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Seat */}
+          <mesh position={[0, seatH, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, 0.06, d]} />
+            <meshStandardMaterial color="#8b6f5e" roughness={0.8} />
+          </mesh>
+          {/* Backrest */}
+          <mesh position={[0, seatH + 0.25, -d / 2 + 0.03]} castShadow>
+            <boxGeometry args={[w, 0.5, 0.05]} />
+            <meshStandardMaterial color="#7a6050" roughness={0.8} />
+          </mesh>
+          {/* Legs */}
+          {([-1, 1] as const).flatMap((sx) =>
+            ([-1, 1] as const).map((sz, li) => (
+              <mesh key={`${sx}${li}`} position={[sx * (w / 2 - 0.04), seatH / 2, sz * (d / 2 - 0.04)]} castShadow>
+                <boxGeometry args={[0.04, seatH, 0.04]} />
+                <meshStandardMaterial color="#5a3e2b" roughness={0.7} />
+              </mesh>
+            )),
+          )}
+        </group>
+      );
+    }
+
+    case 'coffee_table': {
+      const th = 0.4;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          <mesh position={[0, th, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, 0.05, d]} />
+            <meshStandardMaterial color="#a07850" roughness={0.5} metalness={0.05} />
+          </mesh>
+          {([-1, 1] as const).flatMap((sx) =>
+            ([-1, 1] as const).map((sz, li) => (
+              <mesh key={`${sx}${li}`} position={[sx * (w / 2 - 0.05), th / 2, sz * (d / 2 - 0.05)]} castShadow>
+                <boxGeometry args={[0.05, th, 0.05]} />
+                <meshStandardMaterial color="#8b6535" roughness={0.6} />
+              </mesh>
+            )),
+          )}
+        </group>
+      );
+    }
+
+    case 'side_table': {
+      const th = 0.5;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          <mesh position={[0, th, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, 0.04, d]} />
+            <meshStandardMaterial color="#9a7b5a" roughness={0.6} />
+          </mesh>
+          <mesh position={[0, th / 2, 0]} castShadow>
+            <boxGeometry args={[w * 0.25, th, d * 0.25]} />
+            <meshStandardMaterial color="#80654a" roughness={0.7} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'desk': {
+      const dh = 0.75;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          <mesh position={[0, dh, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, 0.04, d]} />
+            <meshStandardMaterial color="#9a7b5a" roughness={0.6} />
+          </mesh>
+          {/* Side panels */}
+          {([-1, 1] as const).map((sx, si) => (
+            <mesh key={si} position={[sx * (w / 2 - 0.02), dh / 2, 0]} castShadow>
+              <boxGeometry args={[0.04, dh, d * 0.9]} />
+              <meshStandardMaterial color="#80654a" roughness={0.7} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case 'bookshelf': {
+      const bh = 1.8;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          <mesh position={[0, bh / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, bh, d]} />
+            <meshStandardMaterial color="#6b4f3a" roughness={0.75} />
+          </mesh>
+          {/* Shelf lines on the front face */}
+          {[0.3, 0.7, 1.1, 1.5].map((sy, si) => (
+            <mesh key={si} position={[0, sy, d / 2 + 0.002]}>
+              <boxGeometry args={[w * 0.9, 0.04, 0.006]} />
+              <meshStandardMaterial color="#3d2e20" />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case 'vanity': {
+      const vh = 0.85;
+      const basinR = Math.min(w, d) * 0.28;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Cabinet */}
+          <mesh position={[0, (vh - 0.04) / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, vh - 0.04, d]} />
+            <meshStandardMaterial color="#a98a6a" roughness={0.7} />
+          </mesh>
+          {/* Counter */}
+          <mesh position={[0, vh - 0.02, 0]} castShadow>
+            <boxGeometry args={[w, 0.04, d]} />
+            <meshStandardMaterial color="#8a8078" roughness={0.3} metalness={0.1} />
+          </mesh>
+          {/* Basin */}
+          <mesh position={[0, vh + 0.04, 0]} castShadow>
+            <cylinderGeometry args={[basinR, basinR * 0.8, 0.12, 20]} />
+            <meshStandardMaterial color="#f5f2ee" roughness={0.4} />
+          </mesh>
+          {/* Mirror on the wall behind */}
+          <mesh position={[0, vh + 0.55, -d / 2 + 0.01]}>
+            <boxGeometry args={[w * 0.7, 0.7, 0.02]} />
+            <meshStandardMaterial color="#9fc0d4" roughness={0.05} metalness={0.5} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'shower': {
+      const gh = 2.0; // glass height
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Tray */}
+          <mesh position={[0, 0.05, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, 0.1, d]} />
+            <meshStandardMaterial color="#dfe4e8" roughness={0.4} metalness={0.1} />
+          </mesh>
+          {/* Glass partition (front + one side, like a corner stall) */}
+          <mesh position={[0, gh / 2, d / 2 - 0.02]}>
+            <boxGeometry args={[w, gh, 0.02]} />
+            <meshPhysicalMaterial color="#bcd6e6" transparent opacity={0.18} roughness={0.02} transmission={0.85} thickness={0.02} />
+          </mesh>
+          <mesh position={[w / 2 - 0.02, gh / 2, 0]}>
+            <boxGeometry args={[0.02, gh, d]} />
+            <meshPhysicalMaterial color="#bcd6e6" transparent opacity={0.18} roughness={0.02} transmission={0.85} thickness={0.02} />
+          </mesh>
+          {/* Shower head on the back wall */}
+          <mesh position={[-w / 2 + 0.12, gh - 0.25, -d / 2 + 0.12]} castShadow>
+            <cylinderGeometry args={[0.08, 0.08, 0.03, 16]} />
+            <meshStandardMaterial color="#c0c4c8" metalness={0.7} roughness={0.3} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'bathtub': {
+      const bth = 0.55;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Tub body */}
+          <mesh position={[0, bth / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, bth, d]} />
+            <meshStandardMaterial color="#f3f5f7" roughness={0.3} metalness={0.05} />
+          </mesh>
+          {/* Inner basin recess */}
+          <mesh position={[0, bth - 0.04, 0]}>
+            <boxGeometry args={[w * 0.85, 0.1, d * 0.7]} />
+            <meshStandardMaterial color="#dbe6ee" roughness={0.2} metalness={0.1} />
+          </mesh>
+          {/* Faucet */}
+          <mesh position={[-w / 2 + 0.12, bth + 0.12, 0]} castShadow>
+            <cylinderGeometry args={[0.02, 0.02, 0.24, 8]} />
+            <meshStandardMaterial color="#9aa0a6" metalness={0.7} roughness={0.3} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'mirror': {
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Frame */}
+          <mesh position={[0, 1.5, 0]} castShadow>
+            <boxGeometry args={[w, 0.7, Math.max(d, 0.04)]} />
+            <meshStandardMaterial color="#6b5b4a" roughness={0.6} />
+          </mesh>
+          {/* Glass */}
+          <mesh position={[0, 1.5, d / 2 + 0.001]}>
+            <boxGeometry args={[w * 0.9, 0.62, 0.005]} />
+            <meshStandardMaterial color="#9fc0d4" roughness={0.05} metalness={0.6} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'towel_rail': {
+      const rh = 1.1;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Rail */}
+          <mesh position={[0, rh, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[0.015, 0.015, w, 10]} />
+            <meshStandardMaterial color="#c0c4c8" metalness={0.7} roughness={0.3} />
+          </mesh>
+          {/* Draped towel */}
+          <mesh position={[0, rh - 0.25, d / 2]} castShadow>
+            <boxGeometry args={[w * 0.7, 0.5, 0.04]} />
+            <meshStandardMaterial color="#e8e2d8" roughness={0.95} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'geyser': {
+      const gy = 1.8; // wall-mounted height
+      const r = Math.min(w, d) * 0.5;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Horizontal storage cylinder */}
+          <mesh position={[0, gy, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[r, r, Math.max(w, d), 20]} />
+            <meshStandardMaterial color="#eef0f2" roughness={0.4} metalness={0.2} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case 'washing_machine': {
+      const wm = 0.85;
+      const doorR = Math.min(w, wm) * 0.3;
+      return (
+        <group position={[x, 0, z]} rotation={[0, -rot, 0]}>
+          {/* Body */}
+          <mesh position={[0, wm / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[w, wm, d]} />
+            <meshStandardMaterial color="#eef0f2" roughness={0.4} metalness={0.2} />
+          </mesh>
+          {/* Front-load door */}
+          <mesh position={[0, wm * 0.5, d / 2 + 0.02]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[doorR, doorR, 0.04, 24]} />
+            <meshPhysicalMaterial color="#3a4a52" transparent opacity={0.55} roughness={0.1} metalness={0.3} />
+          </mesh>
+          {/* Control panel */}
+          <mesh position={[0, wm - 0.06, d / 2 + 0.001]}>
+            <boxGeometry args={[w * 0.9, 0.08, 0.005]} />
+            <meshStandardMaterial color="#2b2b2b" roughness={0.5} />
+          </mesh>
+        </group>
+      );
+    }
+
     default: {
       // Generic box fallback for unknown types
       return (
@@ -549,7 +877,6 @@ function Scene() {
   const floor = plan.floors[0];
 
   const wallTex  = useMemo(() => makePlasterTexture(),  []);
-  const ceilTex  = useMemo(() => makeCeilingTexture(), []);
 
   if (!floor) return null;
 
@@ -573,6 +900,20 @@ function Scene() {
     }
     return map;
   }, [floor.openings]);
+
+  // Ground is sized to the building's actual extent (the bounding box of all
+  // wall points, unioned with the plot), since walls can be drawn well outside
+  // the default plot rectangle — otherwise rooms past the plot edge float.
+  const GROUND_MARGIN = 3; // metres of ground around the structure
+  let minX = 0, maxX = widthCm, minY = 0, maxY = depthCm;
+  for (const p of floor.points) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  const groundCx = ((minX + maxX) / 2) * CM;
+  const groundCz = ((minY + maxY) / 2) * CM;
+  const groundW  = (maxX - minX) * CM + GROUND_MARGIN * 2;
+  const groundD  = (maxY - minY) * CM + GROUND_MARGIN * 2;
 
   return (
     <>
@@ -609,17 +950,17 @@ function Scene() {
       {/* Ceiling bounce */}
       <pointLight position={[cx, WALL_H - 0.1, cz]} intensity={0.6} color="#fff5e0" distance={Math.max(w, d) * 2} />
 
-      {/* Ground plane — extends past the plot for a grounded look */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.005, cz]} receiveShadow>
-        <planeGeometry args={[w + 10, d + 10]} />
+      {/* Ground plane — covers the whole building footprint */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[groundCx, -0.005, groundCz]} receiveShadow>
+        <planeGeometry args={[groundW, groundD]} />
         <meshStandardMaterial color="#b8b0a0" roughness={0.9} />
       </mesh>
 
       {/* Contact shadows baked under the structure */}
       <ContactShadows
-        position={[cx, 0, cz]}
-        width={w + 4}
-        height={d + 4}
+        position={[groundCx, 0, groundCz]}
+        width={groundW}
+        height={groundD}
         far={0.5}
         blur={2.5}
         opacity={0.4}
@@ -630,9 +971,6 @@ function Scene() {
       {floor.rooms.map((room, i) => (
         <RoomSlab key={room.id} room={room} floor={floor} colorIndex={i} />
       ))}
-
-      {/* Ceiling */}
-      <CeilingSlab plot={plan.plot} ceilTex={ceilTex} />
 
       {/* Walls */}
       {floor.walls.map(wall => (

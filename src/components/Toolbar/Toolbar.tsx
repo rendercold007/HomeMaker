@@ -1,5 +1,4 @@
-import { usePlan } from '../../state/PlanContext';
-import { useTool, type Tool } from '../../state/ToolContext';
+import { usePlan, useTool, type Tool } from '../../state/store';
 
 const TOOLS: { id: Tool; label: string; hint: string; icon: React.ReactNode }[] = [
   {

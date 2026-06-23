@@ -29,6 +29,8 @@ export interface Wall {
   b: ID;
   /** Wall thickness in cm. */
   thickness: number;
+  /** Wall height in cm — used by the 3D extrusion view. */
+  height: number;
 }
 
 /** A door or window cut into a wall. */
@@ -85,11 +87,6 @@ export interface Plot {
   setbacks: { front: number; rear: number; left: number; right: number };
 }
 
-/** Vastu compliance mode for the rules engine. */
-export interface VastuConfig {
-  mode: 'strict' | 'loose' | 'off';
-}
-
 /** The top-level document. Everything else hangs off this. */
 export interface Plan {
   id: ID;
@@ -97,5 +94,4 @@ export interface Plan {
   units: 'cm';
   plot: Plot;
   floors: Floor[];
-  vastu: VastuConfig;
 }

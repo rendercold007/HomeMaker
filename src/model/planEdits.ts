@@ -17,6 +17,9 @@ type IdGen = () => ID;
 /** Default thickness for newly drawn walls, in cm. */
 export const DEFAULT_WALL_THICKNESS = 10;
 
+/** Default height for newly drawn walls, in cm (used by the 3D view). */
+export const DEFAULT_WALL_HEIGHT = 270;
+
 /** Replace one floor in the plan, returning a new plan. */
 function withFloor(plan: Plan, floorId: ID, next: Floor): Plan {
   return {
@@ -67,6 +70,7 @@ export function addWall(
   b: ID,
   thickness = DEFAULT_WALL_THICKNESS,
   newId: IdGen = defaultNewId,
+  height = DEFAULT_WALL_HEIGHT,
 ): Plan {
   if (a === b) return plan;
   const floor = getFloor(plan, floorId);
@@ -76,7 +80,7 @@ export function addWall(
   if (exists) return plan;
   const next: Floor = {
     ...floor,
-    walls: [...floor.walls, { id: newId(), a, b, thickness }],
+    walls: [...floor.walls, { id: newId(), a, b, thickness, height }],
   };
   return recomputeRooms(withFloor(plan, floorId, next));
 }
@@ -255,7 +259,7 @@ export function createEmptyFloor(level = 0, newId: IdGen = defaultNewId): Floor 
 }
 
 /**
- * A fresh, empty plan with one floor and a sensible default Bengaluru-ish plot
+ * A fresh, empty plan with one floor and a sensible default plot
  * (30x40 ft ≈ 914x1219 cm). Used as the editor's starting document.
  */
 export function createInitialPlan(newId: IdGen = defaultNewId): Plan {
@@ -271,6 +275,5 @@ export function createInitialPlan(newId: IdGen = defaultNewId): Plan {
       setbacks: { front: 150, rear: 150, left: 90, right: 90 },
     },
     floors: [createEmptyFloor(0, newId)],
-    vastu: { mode: 'loose' },
   };
 }

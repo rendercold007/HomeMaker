@@ -1,31 +1,23 @@
 import { useState } from 'react';
-import { PlanProvider } from './state/PlanContext';
-import { ToolProvider } from './state/ToolContext';
-import { SelectionProvider } from './state/SelectionContext';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { CanvasStage } from './components/Canvas/CanvasStage';
 import { FurniturePalette } from './components/Panels/FurniturePalette';
 import { InfoPanel } from './components/Panels/InfoPanel';
-import { VastuPanel } from './components/Panels/VastuPanel';
-import { GeneratePanel } from './components/Panels/GeneratePanel';
-import { ChatPanel } from './components/Panels/ChatPanel';
 import { PlansPanel } from './components/Panels/PlansPanel';
 import { Viewer3D } from './components/Viewer3D/Viewer3D';
-import { usePlan } from './state/PlanContext';
+import { usePlan } from './state/store';
 import { savePlan } from './lib/storage';
 import { exportPNG, exportPDF } from './lib/export';
 
-type LeftTab = 'generate' | 'chat' | 'plans' | 'furniture';
+type LeftTab = 'furniture' | 'plans';
 
 const TABS: { id: LeftTab; label: string; icon: string }[] = [
-  { id: 'generate',  label: 'Generate',  icon: '✦' },
-  { id: 'chat',      label: 'Chat',      icon: '◈' },
-  { id: 'plans',     label: 'Plans',     icon: '▤' },
   { id: 'furniture', label: 'Palette',   icon: '⬡' },
+  { id: 'plans',     label: 'Plans',     icon: '▤' },
 ];
 
 function LeftSidebar() {
-  const [tab, setTab] = useState<LeftTab>('generate');
+  const [tab, setTab] = useState<LeftTab>('furniture');
 
   return (
     <div className="flex w-56 flex-none flex-col" style={{ background: '#0f172a' }}>
@@ -49,10 +41,8 @@ function LeftSidebar() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'generate'  && <GeneratePanel />}
-        {tab === 'chat'      && <ChatPanel />}
-        {tab === 'plans'     && <PlansPanel />}
         {tab === 'furniture' && <FurniturePalette />}
+        {tab === 'plans'     && <PlansPanel />}
       </div>
     </div>
   );
@@ -116,7 +106,7 @@ function AppShell() {
           </div>
           <div>
             <h1 className="text-sm font-bold text-white leading-none">HomeMaker</h1>
-            <p className="text-[10px] text-indigo-300 leading-none mt-0.5">Indian Home Designer</p>
+            <p className="text-[10px] text-indigo-300 leading-none mt-0.5">2D → 3D Floor Plan Editor</p>
           </div>
         </div>
 
@@ -171,7 +161,6 @@ function AppShell() {
         </main>
         <div className="flex min-h-0 w-56 flex-none flex-col" style={{ background: '#0f172a', borderLeft: '1px solid #1e293b' }}>
           <InfoPanel />
-          <VastuPanel />
         </div>
       </div>
     </div>
@@ -179,13 +168,5 @@ function AppShell() {
 }
 
 export default function App() {
-  return (
-    <PlanProvider>
-      <ToolProvider>
-        <SelectionProvider>
-          <AppShell />
-        </SelectionProvider>
-      </ToolProvider>
-    </PlanProvider>
-  );
+  return <AppShell />;
 }

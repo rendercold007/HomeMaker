@@ -4,7 +4,7 @@
  * Clicking an item activates the 'furniture' tool and sets the active type.
  * The active item stays highlighted so the user knows what's being placed.
  */
-import { useTool } from '../../state/ToolContext';
+import { useTool } from '../../state/store';
 import { FURNITURE_CATALOG } from '../../model/furniture';
 
 export function FurniturePalette() {

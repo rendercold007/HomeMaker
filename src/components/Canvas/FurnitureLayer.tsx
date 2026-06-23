@@ -9,7 +9,7 @@ import type { KonvaEventObject } from 'konva/lib/Node';
 import type { Floor, ID } from '../../model/types';
 import { getFurnitureDef } from '../../model/furniture';
 import type { Vec2 } from '../../model/geometry';
-import type { Tool } from '../../state/ToolContext';
+import type { Tool } from '../../state/store';
 
 interface FurnitureLayerProps {
   floor: Floor;

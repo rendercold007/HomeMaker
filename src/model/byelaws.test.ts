@@ -44,7 +44,6 @@ function cleanPlan(floors: Floor[], plot?: Plot): Plan {
     units: 'cm',
     plot: plot ?? makePlot(),
     floors,
-    vastu: { mode: 'off' },
   };
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { usePlan } from '../../state/PlanContext';
+import { usePlan } from '../../state/store';
 import { listPlans, loadPlan, deletePlan, type PlanMeta } from '../../lib/storage';
 
 function formatDate(ts: number): string {

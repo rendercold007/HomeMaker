@@ -1,15 +1,14 @@
 # CLAUDE.md
 
 > Project context for Claude Code. Read this before making changes.
-> Rename the project (`gharsaaz` is a placeholder) and adjust paths as the codebase grows.
 
 ## What we're building
 
-A web-based home design tool: a **hands-on floor-plan editor** where users draw, drag, and snap walls directly on a canvas — not just prompt or pick from templates. AI assists *inside* the editor (generate a starter layout, edit by chat, auto-furnish) rather than replacing it.
+A web-based **manual home design tool**: users draw a 2D floor plan on a grid — drawing, dragging, and snapping walls directly on a canvas — and instantly visualize and navigate it in 3D. The 2D editor and the 3D view are two windows onto **one shared model**; editing the plan in 2D immediately updates the 3D scene.
 
-The wedge — and the reason this isn't "another Planner 5D" — is the **Indian market that the global tools ignore**: Vastu compliance, pooja rooms, parking, joint-family layouts, and local building bye-laws (Bengaluru/BBMP setbacks and FAR) are first-class, built-in concepts. Vastu is treated as a **constraint system**, which is what makes AI layout generation tractable: instead of learning generic "livability," the AI satisfies explicit directional rules.
+There is **no AI** in v1. The product is the hands-on editor and the live 2D→3D round-trip. (An earlier direction explored AI layout generation and Vastu/region-specific compliance; both were dropped — see git history.)
 
-When in doubt about a feature, ask: "does this serve the hands-on editing experience, or the Indian-home differentiator?" If neither, it's probably out of scope for v1.
+When in doubt about a feature, ask: "does this serve the hands-on editing experience, or the 2D→3D round-trip?" If neither, it's probably out of scope for v1.
 
 ## Tech stack
 
@@ -19,25 +18,24 @@ When in doubt about a feature, ask: "does this serve the hands-on editing experi
 | Build/dev | Vite | `npm run dev` / `build` / `preview`. |
 | UI | React 18 + Tailwind CSS | Function components + hooks only. |
 | 2D canvas | react-konva (Konva) | The editor surface; per-shape event handling. |
-| 3D view | react-three-fiber + three.js | Phase 6 — a *view* of the 2D model, not a separate system. |
-| State | React Context | See the state rules below — this needs discipline. |
-| AI | Claude API (model: `claude-sonnet-4-6`) | Called via a dev proxy, never directly from the browser. |
-| Validation | zod | Validate AI JSON output against the Plan schema before rendering. |
-| Persistence | localStorage / IndexedDB | Local-only for v1. No backend yet. |
-| Testing | Vitest | For the pure geometry/rules logic. |
+| 3D view | react-three-fiber + three.js + drei | Extrudes the 2D wall graph; OrbitControls to navigate. |
+| State | **Zustand** | One unified store is the source of truth. See the state rules below. |
+| Persistence | localStorage | Local-only for v1. No backend. |
+| Export | jsPDF | PNG / PDF of the canvas. |
+| Testing | Vitest | For the pure geometry/rules logic in `src/model/`. |
 | Package manager | npm | |
 
-No backend in v1: plans are saved to the browser. The only server-side piece is a thin proxy for the Claude API key (a Vite dev-server proxy now, a serverless function later) — the key must NEVER ship in client code.
+No backend: plans are saved to the browser. There is no server-side piece.
 
 ## Architecture
 
-Data flows: **input → constraint engine (Vastu + bye-laws) → Claude generates a JSON spec → wall-graph model → 2D editor → (3D view / export)**, with an AI-assist loop on the editor.
+Data flows: **2D canvas (Konva) ⇄ Zustand store ⇄ 3D view (three.js)**.
 
-But the **build order is different from the data flow**: build the model and editor first (they work with zero AI), then the rules engine, then bolt AI on top. AI generates *into* the editor, so the editor must exist first.
+The most important architectural rule: **Konva and three.js never talk to each other directly.** They both subscribe to the shared Zustand store. Drag a wall in 2D → Konva commits to the store → the 3D view re-renders from the new state. Build order: model + 2D editor first (they work with zero 3D), then the 3D viewer as a pure function of the model.
 
 ### The core data model (most important thing in the codebase)
 
-Everything — editor, AI, exporter — reads and writes this one schema. Rooms are **not** stored; they are *derived* by finding closed cycles in the wall graph. Keep these types stable; changing them ripples everywhere.
+Everything — 2D editor, 3D view, exporter — reads and writes this one schema. Rooms are **not** stored; they are *derived* by finding closed cycles in the wall graph (`src/model/roomDetect.ts`). Walls reference shared `Point` ids, so dragging a corner moves every wall attached to it. Keep these types stable; changing them ripples everywhere.
 
 ```ts
 // All coordinates in CENTIMETERS (integer-friendly world units).
@@ -47,7 +45,7 @@ Everything — editor, AI, exporter — reads and writes this one schema. Rooms 
 type ID = string;
 
 interface Point { id: ID; x: number; y: number }          // world cm
-interface Wall  { id: ID; a: ID; b: ID; thickness: number } // endpoints = Point ids; thickness cm
+interface Wall  { id: ID; a: ID; b: ID; thickness: number; height: number } // endpoints = Point ids; cm
 interface Opening {
   id: ID; wallId: ID; kind: 'door' | 'window';
   offset: number;  // distance along wall from endpoint a, cm
@@ -70,11 +68,10 @@ interface Plot {
   entrance: 'N' | 'S' | 'E' | 'W';
   setbacks: { front: number; rear: number; left: number; right: number }; // cm
 }
-interface VastuConfig { mode: 'strict' | 'loose' | 'off' }
 
 interface Plan {
   id: ID; name: string; units: 'cm';
-  plot: Plot; floors: Floor[]; vastu: VastuConfig;
+  plot: Plot; floors: Floor[];
 }
 ```
 
@@ -86,39 +83,34 @@ src/
     types.ts        # the schema above
     geometry.ts     # distance, snapping, angle-lock, segment intersection
     roomDetect.ts   # cycle detection in the wall graph → Room[]
-    vastu.ts        # Vastu rules engine → violations + score
-    byelaws.ts      # BBMP setback / FAR checks
-  state/            # React Context providers (see rules below)
-    PlanContext.tsx       # the committed document (Plan)
-    ToolContext.tsx       # active tool/mode, grid settings
-    SelectionContext.tsx  # current selection
+    planEdits.ts    # pure, immutable edits to a Plan (add/move/delete walls, etc.)
+    byelaws.ts      # generic setback / FAR checks (configurable per jurisdiction)
+    furniture.ts    # furniture catalog + lookup
+  state/
+    store.ts        # the unified Zustand store + usePlan / useTool / useSelection hooks
   components/
-    Canvas/         # react-konva editor surface
+    Canvas/         # react-konva editor surface (CanvasStage + layers)
     Toolbar/
-    Panels/         # properties, dimensions, vastu report
-    Viewer3D/       # react-three-fiber (Phase 6)
-  ai/
-    generate.ts     # prompt → Plan spec
-    assist.ts       # chat edit → modified Plan
-    schema.ts       # zod schema mirroring types.ts; validates AI output
+    Panels/         # info / dimensions, furniture palette, saved plans
+    Viewer3D/       # react-three-fiber — extrudes the wall graph
   lib/
-    storage.ts      # localStorage / IndexedDB
-    export.ts       # PNG / PDF / DXF
+    storage.ts      # localStorage save/load
+    export.ts       # PNG / PDF
+    units.ts        # cm → ft-in / m formatting
   App.tsx
 ```
 
 ## Conventions
 
-### State (React Context — read this carefully)
+### State (Zustand — read this carefully)
 
-Context re-renders all consumers on every value change. In a canvas editor with continuous drag events, naive Context = jank. Follow this split:
+The store in `src/state/store.ts` holds three concerns: the committed `Plan` (with undo/redo history), the active tool + grid settings, and the current selection. Consumers use the `usePlan` / `useTool` / `useSelection` hooks, each of which selects a narrow slice via `useShallow` so unrelated changes don't re-render.
 
-- **Committed document state** (the `Plan`: points, walls, rooms) lives in `PlanContext`. It changes only on **discrete commits** — finishing a wall, ending a drag, completing an edit.
-- **Transient / high-frequency state** (live mouse position, the wall being rubber-banded, the in-progress drag delta) lives in **local component state or refs** — NEVER in Context. Write to Context only on `mouseup` / commit.
-- Keep `PlanContext`, `ToolContext`, and `SelectionContext` **separate** so a tool change doesn't re-render the whole canvas.
-- Wrap context values in `useMemo` and callbacks in `useCallback`.
+- **Committed document state** (the `Plan`: points, walls, rooms) changes only on **discrete commits** — finishing a wall, ending a drag, completing an edit. Each commit is one undo step.
+- **Transient / high-frequency state** (live mouse position, the wall being rubber-banded, the in-progress drag delta) lives in **local component state or refs** — NEVER in the store. Write to the store only on `mouseup` / commit. Committing every drag frame would push a snapshot per frame onto the undo stack.
+- Select narrow slices. Don't subscribe a component to the whole store.
 
-If a change makes the canvas stutter during drag, the cause is almost always transient state leaking into Context — fix that first.
+If a change makes the canvas stutter during drag, the cause is almost always transient state leaking into the store — fix that first.
 
 ### Units and geometry
 
@@ -128,38 +120,32 @@ If a change makes the canvas stutter during drag, the cause is almost always tra
 
 ### Pure logic stays pure
 
-Everything in `src/model/` must have **zero React imports** and be covered by Vitest. Geometry, room detection, Vastu, and bye-law checks are all input→output functions — test them like algorithm problems (feed a plan, assert the result). This keeps the hard logic verifiable independent of the UI.
+Everything in `src/model/` must have **zero React imports** and be covered by Vitest. Geometry, room detection, and bye-law checks are all input→output functions — test them like algorithm problems (feed a plan, assert the result).
 
-### AI integration
+### 3D view
 
-- Model string: `claude-sonnet-4-6`. The API key lives server-side (dev proxy / serverless function) — **never** in client bundles or committed to git.
-- The system prompt instructs Claude to output **only** JSON matching the Plan schema, satisfying the active Vastu/bye-law constraints, with no preamble.
-- **Always** validate AI output with the zod schema in `ai/schema.ts` before rendering. Reject and retry on invalid output; never render unvalidated JSON.
+The 3D view is a pure function of the `Plan`. Each wall extrudes to a box of its `thickness` × `height`, split into segments around door/window openings. Room floors are filled `THREE.Shape`s; furniture maps to simple meshes by type. Coordinate mapping: cm ÷ 100 → metres, and 2D `y` → 3D `z` (depth). Never store 3D-only state back into the model.
 
 ### Working style
 
 - **Prefer targeted edits over rewrites.** When fixing a bug, change the specific lines responsible — don't regenerate whole files.
 - Small, single-purpose components. Lift state only as far as needed.
-- Add undo/redo early (state snapshots of `Plan`); don't defer it.
+- Keep undo/redo working (state snapshots of `Plan`); don't defer it.
 
 ## Roadmap (build in this order)
 
-- **Phase 0 — Data model + coordinate math.** `types.ts`, pan/zoom transform. *(foundation)*
-- **Phase 1 — Hands-on 2D editor.** Grid, wall drawing + snapping + live dimensions, select/drag/delete, undo/redo, room detection. *← current focus; usable with zero AI*
-- **Phase 2 — Openings + furniture.** Doors/windows as openings in walls; furniture palette with drag/rotate/snap.
-- **Phase 3 — Vastu + bye-law engine.** Pure rules in `model/`, fully tested. Built before AI because AI uses these as constraints.
-- **Phase 4 — AI generation.** Claude → validated Plan spec → renders in the editor. *(MVP = Phases 0–4)*
-- **Phase 5 — In-editor AI assist.** Chat edits + auto-furnish.
-- **Phase 6 — 3D view.** Extrude walls via react-three-fiber.
-- **Phase 7 — Persistence + export.** localStorage/IndexedDB save-load; PNG/PDF, then DXF.
-
-MVP and portfolio centerpiece = Phases 0–4. Phases 5–7 are upgrades once the core is proven.
+- **Phase 1 — Grid + state + drawing.** React-Konva stage, dot grid, wall drawing with snapping + live dimensions, select/drag/delete, undo/redo, room detection. *(done)*
+- **Phase 2 — Openings + furniture.** Doors/windows as openings in walls; furniture palette with drag/rotate/snap. *(done)*
+- **Phase 3 — 3D viewer.** Extrude the wall graph via react-three-fiber; OrbitControls; render furniture. *(done)*
+- **Phase 4 — Wall joins & mitering.** Clean up corners where walls meet so they don't overlap awkwardly.
+- **Phase 5 — Persistence + export polish.** localStorage save/load; PNG/PDF, then DXF.
 
 ## Commands
 
 ```bash
-npm run dev       # Vite dev server
-npm run build     # production build
-npm run preview   # preview the build
-npm run test      # Vitest (model/ logic)
+npm run dev        # Vite dev server
+npm run build      # production build (tsc -b && vite build)
+npm run preview    # preview the build
+npm run test       # Vitest (model/ logic)
+npm run typecheck  # tsc on app + node projects
 ```

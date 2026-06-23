@@ -17,6 +17,7 @@ function build(
     a,
     b,
     thickness: 10,
+    height: 270,
   }));
   return { points, walls };
 }

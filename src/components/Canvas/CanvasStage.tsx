@@ -37,9 +37,7 @@ import {
   DEFAULT_DOOR_WIDTH,
   DEFAULT_WINDOW_WIDTH,
 } from '../../model/planEdits';
-import { usePlan } from '../../state/PlanContext';
-import { useTool } from '../../state/ToolContext';
-import { useSelection } from '../../state/SelectionContext';
+import { usePlan, useTool, useSelection } from '../../state/store';
 
 import { useElementSize } from './useElementSize';
 import { setStageRef } from '../../lib/stageRef';

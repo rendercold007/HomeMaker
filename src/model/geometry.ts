@@ -213,6 +213,27 @@ export function distanceToSegment(
 }
 
 /**
+ * Intersection of two infinite lines, each given as a point on the line and a
+ * direction vector (directions need not be unit length). Returns `null` when the
+ * lines are parallel (or near-parallel within a small epsilon), where no single
+ * intersection exists. Used by the wall miter solver to find where neighbouring
+ * wall edges meet at a shared corner.
+ */
+export function lineIntersection(
+  p1: Vec2,
+  d1: Vec2,
+  p2: Vec2,
+  d2: Vec2,
+): Vec2 | null {
+  const cross = d1.x * d2.y - d1.y * d2.x;
+  if (Math.abs(cross) < 1e-9) return null;
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const s = (dx * d2.y - dy * d2.x) / cross;
+  return { x: p1.x + s * d1.x, y: p1.y + s * d1.y };
+}
+
+/**
  * Signed area of a polygon via the shoelace formula (world cm²).
  * In screen coordinates (y down), a CLOCKWISE polygon yields a POSITIVE value.
  * Callers that need a positive area should take the absolute value.
