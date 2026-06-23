@@ -10,10 +10,17 @@ interface Plan { plot: Plot; vastu: VastuConfig; floors: Floor[] }
 type ViewType = 'interior' | 'exterior';
 type Quality  = 'quick' | 'hd';
 
+// OpenRouter image-output models (chat-completions + modalities, NOT /images).
 const MODEL: Record<Quality, string> = {
-  quick: 'black-forest-labs/flux-schnell',
-  hd:    'black-forest-labs/flux-1.1-pro',
+  quick: 'google/gemini-3.1-flash-image',
+  hd:    'google/gemini-3-pro-image',
 };
+
+// Response shape: choices[].message.images[].image_url.url (base64 data URL).
+// This field is an OpenRouter extension absent from the OpenAI SDK types.
+interface ImageMessage {
+  images?: Array<{ image_url?: { url?: string } }>;
+}
 
 function buildPrompt(plan: Plan, view: ViewType): string {
   const { plot, vastu, floors } = plan;
@@ -22,15 +29,11 @@ function buildPrompt(plan: Plan, view: ViewType): string {
   const plotW = (plot.widthCm / 100).toFixed(1);
   const plotD = (plot.depthCm / 100).toFixed(1);
   const vastuNote = vastu.mode !== 'off' ? 'Vastu Shastra compliant, ' : '';
-
-  const directionMap: Record<string, string> = {
-    N: 'north', S: 'south', E: 'east', W: 'west',
-  };
-  const facing = directionMap[plot.entrance] ?? 'north';
+  const facing = ({ N: 'north', S: 'south', E: 'east', W: 'west' } as Record<string, string>)[plot.entrance] ?? 'north';
 
   if (view === 'interior') {
     return (
-      `Photorealistic interior architectural render of a modern Indian residential home. ` +
+      `Generate a photorealistic interior architectural render of a modern Indian residential home. ` +
       `Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ` +
       `${vastuNote}warm Indian interior design, marble flooring in living areas, ` +
       `warm ambient lighting, wooden accents, decorative jali screens, ` +
@@ -40,7 +43,7 @@ function buildPrompt(plan: Plan, view: ViewType): string {
   }
 
   return (
-    `Photorealistic exterior render of a modern Indian residential house. ` +
+    `Generate a photorealistic exterior render of a modern Indian residential house. ` +
     `${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ` +
     `${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, ` +
     `traditional carved details, terracotta roof accents, landscaped front garden ` +
@@ -67,15 +70,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const client = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
     const prompt = buildPrompt(plan, view);
 
-    const response = await client.images.generate({
-      model:  MODEL[quality] ?? MODEL.quick,
-      prompt,
-      n:      1,
-      size:   '1024x1024',
+    const completion = await client.chat.completions.create({
+      model: MODEL[quality] ?? MODEL.quick,
+      messages: [{ role: 'user', content: prompt }],
+      // @ts-expect-error — OpenRouter image-modality extension not in OpenAI SDK types
+      modalities: ['image', 'text'],
     });
 
-    const url = response.data?.[0]?.url;
-    if (!url) return res.status(500).json({ error: 'No image URL in response.' });
+    const message = completion.choices[0]?.message as ImageMessage | undefined;
+    const url = message?.images?.[0]?.image_url?.url;
+    if (!url) {
+      return res.status(500).json({ error: 'Model returned no image. Try again or switch quality.' });
+    }
 
     return res.status(200).json({ url, prompt });
   } catch (err) {

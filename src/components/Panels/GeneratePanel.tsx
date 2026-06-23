@@ -223,7 +223,7 @@ export function GeneratePanel() {
 
           {/* Quality toggle */}
           <div className="grid grid-cols-2 gap-1">
-            {([['quick', 'Quick (~0.3¢)'], ['hd', 'HD (~4¢)']] as const).map(([q, label]) => (
+            {([['quick', 'Quick (Flash)'], ['hd', 'HD (Pro)']] as const).map(([q, label]) => (
               <button
                 key={q}
                 onClick={() => setRenderQuality(q)}
@@ -309,7 +309,7 @@ export function GeneratePanel() {
               </button>
             </div>
             <div className="bg-black/80 px-4 py-2.5 text-[10px] text-slate-400 leading-relaxed">
-              {renderView === 'interior' ? 'Interior' : 'Exterior'} · {renderQuality === 'quick' ? 'Flux Schnell' : 'Flux 1.1 Pro'} · Click outside to close
+              {renderView === 'interior' ? 'Interior' : 'Exterior'} · {renderQuality === 'quick' ? 'Gemini Flash Image' : 'Gemini Pro Image'} · Click outside to close
             </div>
           </div>
         </div>

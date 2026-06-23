@@ -126,7 +126,9 @@ function aiProxyPlugin(): Plugin {
       });
 
       // ── POST /api/render ──────────────────────────────────────────────────
-      // Generates a photorealistic interior or exterior image via Flux on OpenRouter.
+      // Image generation via OpenRouter chat-completions + image modality.
+      // OpenRouter has no /images endpoint; images come back as base64 data URLs
+      // in choices[].message.images[].image_url.url.
       server.middlewares.use('/api/render', async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST') { sendJson(res, 405, { error: 'Method not allowed' }); return; }
         try {
@@ -146,33 +148,34 @@ function aiProxyPlugin(): Plugin {
           const { plan, view = 'interior', quality = 'quick' } = body;
 
           const MODEL: Record<string, string> = {
-            quick: 'black-forest-labs/flux-schnell',
-            hd:    'black-forest-labs/flux-1.1-pro',
+            quick: 'google/gemini-3.1-flash-image',
+            hd:    'google/gemini-3-pro-image',
           };
 
           const rooms    = plan.floors[0]?.rooms ?? [];
           const roomList = rooms.map((r: { name: string }) => r.name).join(', ');
           const plotW    = (plan.plot.widthCm / 100).toFixed(1);
           const plotD    = (plan.plot.depthCm / 100).toFixed(1);
-          const facing   = ({ N:'north', S:'south', E:'east', W:'west' })[plan.plot.entrance] ?? 'north';
+          const facing   = ({ N:'north', S:'south', E:'east', W:'west' } as Record<string, string>)[plan.plot.entrance] ?? 'north';
           const vastuNote = plan.vastu.mode !== 'off' ? 'Vastu Shastra compliant, ' : '';
 
           const prompt = view === 'interior'
-            ? `Photorealistic interior architectural render of a modern Indian residential home. Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ${vastuNote}warm Indian interior design, marble flooring in living areas, warm ambient lighting, wooden accents, decorative jali screens, traditional Indian artwork on walls, lush indoor plants. Ultra-realistic, professional architectural photography, 8K detail, dramatic lighting.`
-            : `Photorealistic exterior render of a modern Indian residential house. ${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, traditional carved details, terracotta roof accents, landscaped front garden with jasmine and marigold, paved driveway. Golden hour lighting, professional architectural photography, ultra-detailed, 8K.`;
+            ? `Generate a photorealistic interior architectural render of a modern Indian residential home. Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ${vastuNote}warm Indian interior design, marble flooring in living areas, warm ambient lighting, wooden accents, decorative jali screens, traditional Indian artwork on walls, lush indoor plants. Ultra-realistic, professional architectural photography, 8K detail, dramatic lighting.`
+            : `Generate a photorealistic exterior render of a modern Indian residential house. ${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, traditional carved details, terracotta roof accents, landscaped front garden with jasmine and marigold, paved driveway. Golden hour lighting, professional architectural photography, ultra-detailed, 8K.`;
 
           const client   = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
-          const response = await client.images.generate({
-            model:  MODEL[quality] ?? MODEL.quick,
-            prompt,
-            n:      1,
-            size:   '1024x1024',
+          const completion = await client.chat.completions.create({
+            model: MODEL[quality] ?? MODEL.quick,
+            messages: [{ role: 'user', content: prompt }],
+            // @ts-expect-error — OpenRouter image-modality extension not in OpenAI SDK types
+            modalities: ['image', 'text'],
           });
 
-          const url = response.data?.[0]?.url;
-          if (!url) { sendJson(res, 500, { error: 'No image URL in response.' }); return; }
+          const message = completion.choices[0]?.message as { images?: Array<{ image_url?: { url?: string } }> } | undefined;
+          const url = message?.images?.[0]?.image_url?.url;
+          if (!url) { sendJson(res, 500, { error: 'Model returned no image. Try again or switch quality.' }); return; }
 
-          console.log('\n[/api/render]', view, quality, '| url:', url.slice(0, 60) + '…');
+          console.log('\n[/api/render]', view, quality, '| image bytes:', url.length);
           sendJson(res, 200, { url, prompt });
         } catch (err) {
           sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
