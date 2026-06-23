@@ -665,6 +665,10 @@ function PostFX() {
         intensity={18}
         luminanceInfluence={0.6}
         color={new THREE.Color('#1a1008')}
+        worldDistanceThreshold={20}
+        worldDistanceFalloff={5}
+        worldProximityThreshold={0.3}
+        worldProximityFalloff={0.1}
       />
       <SMAA />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />

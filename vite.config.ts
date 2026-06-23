@@ -169,7 +169,7 @@ function aiProxyPlugin(): Plugin {
             size:   '1024x1024',
           });
 
-          const url = response.data[0]?.url;
+          const url = response.data?.[0]?.url;
           if (!url) { sendJson(res, 500, { error: 'No image URL in response.' }); return; }
 
           console.log('\n[/api/render]', view, quality, '| url:', url.slice(0, 60) + '…');
