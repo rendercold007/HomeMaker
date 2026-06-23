@@ -6,7 +6,7 @@
  * SMAA, tone-mapping) so the result reads as an architectural interior render
  * rather than a technical model.
  */
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, Component, type ReactNode } from 'react';
 import { Canvas, useThree, extend } from '@react-three/fiber';
 import {
   OrbitControls,
@@ -672,10 +672,31 @@ function PostFX() {
   );
 }
 
+// ── Error boundary ──────────────────────────────────────────────────────────
+
+class Viewer3DErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ width: '100%', height: '100%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#ff6b6b', textAlign: 'center', padding: 24 }}>
+            <div style={{ fontSize: 18, marginBottom: 8 }}>3D view failed to load</div>
+            <div style={{ fontSize: 12, color: '#888', maxWidth: 400 }}>{this.state.error}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── Public export ───────────────────────────────────────────────────────────
 
 export function Viewer3D() {
   return (
+    <Viewer3DErrorBoundary>
     <div style={{ width: '100%', height: '100%', background: '#1a1a1a' }}>
       <Canvas
         shadows="soft"
@@ -693,5 +714,6 @@ export function Viewer3D() {
         <PostFX />
       </Canvas>
     </div>
+    </Viewer3DErrorBoundary>
   );
 }
