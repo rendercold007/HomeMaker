@@ -8,15 +8,20 @@ export interface RenderResult {
   prompt: string;
 }
 
+/**
+ * @param image - optional PNG data URL of the 2D floor plan, used as a
+ *                structural reference so the render matches the actual layout.
+ */
 export async function renderPlan(
   plan: Plan,
   view: ViewType = 'interior',
   quality: Quality = 'quick',
+  image?: string | null,
 ): Promise<RenderResult> {
   const res = await fetch('/api/render', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ plan, view, quality }),
+    body:    JSON.stringify({ plan, view, quality, image: image ?? undefined }),
   });
 
   const json = await res.json() as { url?: string; prompt?: string; error?: string };

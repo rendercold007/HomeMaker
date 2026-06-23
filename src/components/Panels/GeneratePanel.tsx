@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { usePlan } from '../../state/PlanContext';
 import { generatePlan } from '../../ai/generate';
 import { renderPlan, type ViewType, type Quality } from '../../ai/render';
+import { captureStagePng } from '../../lib/stageRef';
 import type { Plot } from '../../model/types';
 
 type Entrance = Plot['entrance'];
@@ -56,7 +57,8 @@ export function GeneratePanel() {
     setRenderLoading(true);
     setRenderError(null);
     try {
-      const result = await renderPlan(plan, renderView, renderQuality);
+      const floorPlanPng = captureStagePng();
+      const result = await renderPlan(plan, renderView, renderQuality, floorPlanPng);
       setRenderUrl(result.url);
     } catch (err) {
       setRenderError(err instanceof Error ? err.message : String(err));

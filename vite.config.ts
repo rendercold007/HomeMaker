@@ -136,6 +136,7 @@ function aiProxyPlugin(): Plugin {
             plan: import('./src/model/types').Plan;
             view?: 'interior' | 'exterior';
             quality?: 'quick' | 'hd';
+            image?: string;
           }>(req);
 
           const apiKey = env.OPENROUTER_API_KEY;
@@ -145,34 +146,39 @@ function aiProxyPlugin(): Plugin {
           }
 
           const { default: OpenAI } = await import('openai');
-          const { plan, view = 'interior', quality = 'quick' } = body;
+          const { plan, view = 'interior', quality = 'quick', image } = body;
 
           const MODEL: Record<string, string> = {
             quick: 'google/gemini-3.1-flash-image',
             hd:    'google/gemini-3-pro-image',
           };
 
+          const hasFloorPlan = typeof image === 'string' && image.startsWith('data:image');
           const rooms    = plan.floors[0]?.rooms ?? [];
           const roomList = rooms.map((r: { name: string }) => r.name).join(', ');
           const plotW    = (plan.plot.widthCm / 100).toFixed(1);
           const plotD    = (plan.plot.depthCm / 100).toFixed(1);
           const facing   = ({ N:'north', S:'south', E:'east', W:'west' } as Record<string, string>)[plan.plot.entrance] ?? 'north';
           const vastuNote = plan.vastu.mode !== 'off' ? 'Vastu Shastra compliant, ' : '';
+          const planRef   = hasFloorPlan ? 'Use the attached 2D floor plan as the exact structural reference — keep the same room positions, proportions, and adjacencies shown in the plan. ' : '';
 
           const prompt = view === 'interior'
-            ? `Generate a photorealistic interior architectural render of a modern Indian residential home. Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ${vastuNote}warm Indian interior design, marble flooring in living areas, warm ambient lighting, wooden accents, decorative jali screens, traditional Indian artwork on walls, lush indoor plants. Ultra-realistic, professional architectural photography, 8K detail, dramatic lighting.`
-            : `Generate a photorealistic exterior render of a modern Indian residential house. ${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, traditional carved details, terracotta roof accents, landscaped front garden with jasmine and marigold, paved driveway. Golden hour lighting, professional architectural photography, ultra-detailed, 8K.`;
+            ? `${planRef}Generate a photorealistic interior architectural render of a modern Indian residential home. Rooms: ${roomList}. ${plotW}m × ${plotD}m ${facing}-facing plot. ${vastuNote}warm Indian interior design, marble flooring in living areas, warm ambient lighting, wooden accents, decorative jali screens, traditional Indian artwork on walls, lush indoor plants. Ultra-realistic, professional architectural photography, 8K detail, dramatic lighting.`
+            : `${planRef}Generate a photorealistic exterior render of a modern Indian residential house. ${plotW}m × ${plotD}m plot, ${facing}-facing entrance. ${vastuNote}contemporary Indian architecture, warm sandstone and white render finish, traditional carved details, terracotta roof accents, landscaped front garden with jasmine and marigold, paved driveway. Golden hour lighting, professional architectural photography, ultra-detailed, 8K.`;
+
+          const content: Array<Record<string, unknown>> = [{ type: 'text', text: prompt }];
+          if (hasFloorPlan) content.push({ type: 'image_url', image_url: { url: image } });
 
           const client   = new OpenAI({ apiKey, baseURL: 'https://openrouter.ai/api/v1' });
           const completion = await client.chat.completions.create({
             model: MODEL[quality] ?? MODEL.quick,
-            messages: [{ role: 'user', content: prompt }],
-            // @ts-expect-error — OpenRouter image-modality extension not in OpenAI SDK types
+            messages: [{ role: 'user', content }],
             modalities: ['image', 'text'],
-          });
+          } as unknown as Parameters<typeof client.chat.completions.create>[0]) as {
+            choices?: Array<{ message?: { images?: Array<{ image_url?: { url?: string } }> } }>;
+          };
 
-          const message = completion.choices[0]?.message as { images?: Array<{ image_url?: { url?: string } }> } | undefined;
-          const url = message?.images?.[0]?.image_url?.url;
+          const url = completion.choices?.[0]?.message?.images?.[0]?.image_url?.url;
           if (!url) { sendJson(res, 500, { error: 'Model returned no image. Try again or switch quality.' }); return; }
 
           console.log('\n[/api/render]', view, quality, '| image bytes:', url.length);
