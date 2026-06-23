@@ -1,7 +1,47 @@
 // Self-contained prompts for Vercel API functions.
 // No imports from src/ to avoid cross-boundary resolution issues.
 
-export const SYSTEM_PROMPT = `You are an Indian home floor-plan layout generator.
+// ── Generate: Gemini picks WHAT rooms; the layout engine places them ─────────
+// Gemini's only job is to decide which rooms belong in this home and their
+// relative sizes. No coordinates — those are computed algorithmically.
+
+export const GENERATE_SYSTEM_PROMPT = `You are an Indian home layout assistant.
+
+Given a plot and user request, decide which rooms the home should have.
+
+OUTPUT ONLY a valid JSON object — no markdown, no explanation, no text outside the JSON.
+
+{
+  "name": "<short descriptive plan name>",
+  "rooms": [
+    { "name": "<display name>", "type": "<type>", "size": "<small|medium|large>" }
+  ]
+}
+
+VALID TYPES (use exactly these strings):
+  living, master_bedroom, bedroom, kitchen, bathroom,
+  pooja, dining, study, parking, store, utility
+
+SIZE GUIDE:
+  large  — primary/main room of that type (e.g. master bedroom, main living room)
+  medium — secondary rooms (extra bedrooms, dining, kitchen in a big house)
+  small  — service rooms: bathrooms, pooja, store, utility
+
+INDIAN HOME CONVENTIONS:
+  1BHK → living(large), bedroom(medium), kitchen(medium), bathroom(small)
+  2BHK → living(large), master_bedroom(large), bedroom(medium), kitchen(medium), 2×bathroom(small)
+  3BHK → living(large), master_bedroom(large), 2×bedroom(medium), kitchen(medium), 2–3×bathroom(small)
+  4BHK → living(large), master_bedroom(large), 3×bedroom(medium), kitchen(large), 3×bathroom(small)
+
+ALWAYS include: living room, kitchen, at least one bathroom.
+ADD by default unless the user says otherwise:
+  - pooja(small) — standard in Indian homes
+  - dining(medium) — if plot area ≥ 80 m²
+ADD only if user mentions or plot ≥ 100 m²:
+  - parking(large)
+ADD if user mentions: study, store, utility`;
+
+export const ASSIST_SYSTEM_PROMPT = `You are an Indian home floor-plan layout generator.
 
 OUTPUT RULE: Respond with ONLY a valid JSON object. No markdown, no explanation, no text before or after the JSON.
 
@@ -34,60 +74,13 @@ COORDINATE SYSTEM
 ═══════════════════════════════════════════════════════════
 LAYOUT RULES (CRITICAL)
 ═══════════════════════════════════════════════════════════
-1. Every room must fit strictly within the BUILDABLE ZONE (given in user prompt).
-   Room must satisfy: x >= xMin, x+w <= xMax, y >= yMin, y+h <= yMax.
+1. Every room must fit strictly within the BUILDABLE ZONE given in the user prompt.
+2. Rooms must NOT OVERLAP.
+3. Adjacent rooms should share an edge (touching is correct, overlapping is wrong).
+4. Keep rooms that the user did not ask to change.
+5. Honour Vastu placement: kitchen SE, master bedroom SW, pooja NE, bathroom NW.`;
 
-2. Rooms must NOT OVERLAP. Two rooms overlap if their rectangles intersect.
-   Adjacent rooms should share an edge (touching, not overlapping):
-   e.g. room A at x=150,w=300 and room B at x=450 — they share the wall at x=450.
-
-3. Rooms must TILE the buildable zone — together they should fill the space
-   with no large gaps between them.
-
-4. Every room rectangle must have realistic dimensions:
-   - Living room:    w >= 350, h >= 300
-   - Bedroom:        w >= 270, h >= 270
-   - Master bedroom: w >= 330, h >= 330
-   - Kitchen:        w >= 200, h >= 200
-   - Bathroom:       w >= 120, h >= 150
-   - Pooja room:     w >= 120, h >= 120
-   - Parking:        w >= 270, h >= 500
-
-═══════════════════════════════════════════════════════════
-VASTU PLACEMENT (centroid relative to plot centre)
-═══════════════════════════════════════════════════════════
-Plot centre = (widthCm/2, depthCm/2). Compare each room's centre (x+w/2, y+h/2):
-
-  NE = room centre right of plot centre AND above plot centre  → Pooja room, Study
-  SE = room centre right AND below centre                      → Kitchen
-  SW = room centre left AND below centre                       → Master Bedroom
-  NW = room centre left AND above centre                       → Bathroom, Garage
-  N  = near top                                                → Living Room
-  S  = near bottom                                             → Bedrooms, Dining
-
-Strict mode: follow exactly. Loose mode: adjacent directions acceptable.
-
-═══════════════════════════════════════════════════════════
-EXAMPLE — 2-room layout on a 700×500 cm plot, entrance E
-Buildable zone: x ∈ [150, 550], y ∈ [90, 410]
-═══════════════════════════════════════════════════════════
-{
-  "id": "plan-ai",
-  "name": "Simple 1BHK",
-  "plot": {"widthCm":700,"depthCm":500,"shape":"rectangular","entrance":"E",
-           "setbacks":{"front":150,"rear":150,"left":90,"right":90}},
-  "vastu": {"mode":"loose"},
-  "rooms": [
-    {"name":"Living Room","x":150,"y":90,"w":200,"h":320},
-    {"name":"Bedroom",    "x":350,"y":90,"w":200,"h":200},
-    {"name":"Kitchen",    "x":350,"y":290,"w":200,"h":120},
-    {"name":"Bathroom",   "x":150,"y":290,"w":120,"h":120}
-  ]
-}
-
-Note: in the example rooms share edges (Living Room right edge x=350 = Bedroom left edge x=350).
-
-Now generate a complete layout for the user's requirements.`;
+// ── Prompt builders ───────────────────────────────────────────────────────────
 
 interface Setbacks { front: number; rear: number; left: number; right: number }
 interface Plot { widthCm: number; depthCm: number; shape: string; entrance: string; setbacks: Setbacks }
@@ -104,25 +97,23 @@ function buildableZone(plot: Plot) {
   }
 }
 
-export function buildUserPrompt(params: { prompt: string; plot: Plot; vastu: VastuConfig }): string {
+export function buildGeneratePrompt(params: { prompt: string; plot: Plot; vastu: VastuConfig }): string {
   const { prompt, plot, vastu } = params;
   const { widthCm, depthCm, shape } = plot;
   const { xMin, xMax, yMin, yMax } = buildableZone(plot);
+  const buildableW = xMax - xMin;
+  const buildableH = yMax - yMin;
   const plotSqM = ((widthCm / 100) * (depthCm / 100)).toFixed(1);
+  const buildableSqM = ((buildableW / 100) * (buildableH / 100)).toFixed(1);
 
-  return `PLOT:
-  Size: ${widthCm} × ${depthCm} cm (${plotSqM} m²), shape: ${shape}
-  Entrance: ${plot.entrance}
-  Buildable zone: x ∈ [${xMin}, ${xMax}] (width ${xMax - xMin} cm), y ∈ [${yMin}, ${yMax}] (height ${yMax - yMin} cm)
-  Plot centre: (${widthCm / 2}, ${depthCm / 2})
-
+  return `PLOT: ${widthCm} × ${depthCm} cm (${plotSqM} m²), shape: ${shape}, entrance: ${plot.entrance}
+BUILDABLE AREA: ${buildableW} × ${buildableH} cm (${buildableSqM} m²)
 VASTU MODE: ${vastu.mode}
 
-REQUIREMENTS:
+USER REQUEST:
 ${prompt}
 
-Generate the rooms[] array. All rooms must fit inside x ∈ [${xMin}, ${xMax}], y ∈ [${yMin}, ${yMax}].
-Adjacent rooms share edges. No overlaps. Fill the space efficiently.`;
+Output the room list JSON.`;
 }
 
 interface Room { id: string; wallIds: string[]; name: string; areaCm2: number }
@@ -156,20 +147,17 @@ export function buildAssistPrompt(params: { plan: Plan; message: string }): stri
     return `  { "name": "${room.name}", "x": ${Math.round(minX)}, "y": ${Math.round(minY)}, "w": ${Math.round(maxX - minX)}, "h": ${Math.round(maxY - minY)} }`;
   }).filter(Boolean);
 
-  return `PLOT:
-  Size: ${widthCm} × ${depthCm} cm, entrance: ${plot.entrance}
-  Buildable zone: x ∈ [${xMin}, ${xMax}], y ∈ [${yMin}, ${yMax}]
-  Plot centre: (${widthCm / 2}, ${depthCm / 2})
+  return `PLOT: ${widthCm} × ${depthCm} cm, entrance: ${plot.entrance}
+BUILDABLE ZONE: x ∈ [${xMin}, ${xMax}], y ∈ [${yMin}, ${yMax}]
+PLOT CENTRE: (${widthCm / 2}, ${depthCm / 2})
 
 VASTU MODE: ${vastu.mode}
 
-CURRENT LAYOUT (approximate room bounding boxes):
+CURRENT LAYOUT (room bounding boxes):
 ${roomLines.length ? roomLines.join('\n') : '  (no rooms yet)'}
 
 USER REQUEST:
 ${message}
 
-Respond with the complete modified layout as JSON in the same format as usual.
-Keep rooms that the user did not ask to change. Honour Vastu placement rules.
-All rooms must fit in the buildable zone. No overlaps.`;
+Return the complete modified layout JSON. Keep rooms the user did not mention.`;
 }

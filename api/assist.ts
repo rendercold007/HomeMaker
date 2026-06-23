@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
-import { SYSTEM_PROMPT, buildAssistPrompt } from './_prompts.js';
+import { ASSIST_SYSTEM_PROMPT, buildAssistPrompt } from './_prompts.js';
 import { extractJson } from './_shared.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       max_tokens: 8000,
       temperature: 0.4,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: ASSIST_SYSTEM_PROMPT },
         { role: 'user',   content: buildAssistPrompt(body) },
       ],
     });
