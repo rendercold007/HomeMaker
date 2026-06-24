@@ -1,13 +1,26 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { CanvasStage } from './components/Canvas/CanvasStage';
 import { FurniturePalette } from './components/Panels/FurniturePalette';
 import { InfoPanel } from './components/Panels/InfoPanel';
 import { PlansPanel } from './components/Panels/PlansPanel';
-import { Viewer3D } from './components/Viewer3D/Viewer3D';
 import { usePlan } from './state/store';
 import { savePlan } from './lib/storage';
 import { exportPNG, exportPDF } from './lib/export';
+
+// The 3D view pulls in three.js + drei + postprocessing (a large bundle). Load
+// it on demand so 2D-only sessions never pay for it.
+const Viewer3D = lazy(() =>
+  import('./components/Viewer3D/Viewer3D').then((m) => ({ default: m.Viewer3D })),
+);
+
+function Viewer3DFallback() {
+  return (
+    <div className="flex h-full w-full items-center justify-center" style={{ background: '#1a1a1a' }}>
+      <span className="text-sm text-slate-400">Loading 3D view…</span>
+    </div>
+  );
+}
 
 type LeftTab = 'furniture' | 'plans';
 
@@ -157,7 +170,13 @@ function AppShell() {
       <div className="flex min-h-0 flex-1">
         {view === '2d' && <LeftSidebar />}
         <main className="relative min-w-0 flex-1 bg-white">
-          {view === '2d' ? <CanvasStage /> : <Viewer3D />}
+          {view === '2d' ? (
+            <CanvasStage />
+          ) : (
+            <Suspense fallback={<Viewer3DFallback />}>
+              <Viewer3D />
+            </Suspense>
+          )}
         </main>
         <div className="flex min-h-0 w-56 flex-none flex-col" style={{ background: '#0f172a', borderLeft: '1px solid #1e293b' }}>
           <InfoPanel />

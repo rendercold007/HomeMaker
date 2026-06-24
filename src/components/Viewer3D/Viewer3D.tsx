@@ -6,7 +6,16 @@
  * Coordinate mapping: cm ÷ 100 → metres. 2D y → 3D z (depth axis). The 3D view
  * is a pure function of the Plan — no 3D-only state is written back to the model.
  */
-import { useRef, useMemo, Component, type ReactNode } from 'react';
+import {
+  useRef,
+  useMemo,
+  useState,
+  useLayoutEffect,
+  Component,
+  type ComponentRef,
+  type RefObject,
+  type ReactNode,
+} from 'react';
 import { Canvas, useThree, extend } from '@react-three/fiber';
 import { OrbitControls, Environment, SoftShadows, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
@@ -22,22 +31,35 @@ import { PostFX } from './PostFX';
 
 extend({ THREE });
 
+type OrbitControlsRef = ComponentRef<typeof OrbitControls>;
+
 // ── Camera initialiser ──────────────────────────────────────────────────────
 
-function CameraRig({ cx, cz, w, d, buildingH }: {
+function CameraRig({ cx, cz, w, d, buildingH, controlsRef, resetSignal }: {
   cx: number; cz: number; w: number; d: number; buildingH: number;
+  controlsRef: RefObject<OrbitControlsRef>;
+  resetSignal: number;
 }) {
-  const { camera } = useThree();
-  const done = useRef(false);
-  if (!done.current) {
+  const camera = useThree((s) => s.camera);
+
+  // Frame the whole building on mount, whenever its extent changes, and on each
+  // explicit "reset view" (resetSignal bump). useLayoutEffect so it lands before
+  // paint, after the OrbitControls ref is assigned.
+  useLayoutEffect(() => {
     const dist = Math.max(w, d);
     // Lower, pulled-back camera looking at mid-building height so taller
     // (multi-storey) buildings read as an elevation rather than a top-down box.
     const camH = Math.max(dist * 0.55, buildingH * 1.05);
-    camera.position.set(cx - dist * 1.0, camH, cz + dist * 1.2);
-    camera.lookAt(cx, buildingH * 0.45, cz);
-    done.current = true;
-  }
+    camera.position.set(cx - dist, camH, cz + dist * 1.2);
+    const target = new THREE.Vector3(cx, buildingH * 0.45, cz);
+    camera.lookAt(target);
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.target.copy(target);
+      controls.update();
+    }
+  }, [cx, cz, w, d, buildingH, camera, controlsRef, resetSignal]);
+
   return null;
 }
 
@@ -90,9 +112,10 @@ function FloorGroup({ floor, yOffset, wallTex }: {
 
 // ── Scene ───────────────────────────────────────────────────────────────────
 
-function Scene() {
+function Scene({ resetSignal }: { resetSignal: number }) {
   const { plan } = usePlan();
   const wallTex = useMemo(() => makePlasterTexture(), []);
+  const controlsRef = useRef<OrbitControlsRef>(null);
 
   const floors = plan.floors;
   if (floors.length === 0) return null;
@@ -122,7 +145,12 @@ function Scene() {
 
   return (
     <>
-      <CameraRig cx={cx} cz={cz} w={w} d={d} buildingH={(maxLevel + 1) * WALL_H} />
+      <CameraRig
+        cx={cx} cz={cz} w={w} d={d}
+        buildingH={(maxLevel + 1) * WALL_H}
+        controlsRef={controlsRef}
+        resetSignal={resetSignal}
+      />
 
       {/* HDR environment for realistic ambient light + reflections */}
       <Environment preset="apartment" background={false} />
@@ -177,7 +205,9 @@ function Scene() {
         <FloorGroup key={f.id} floor={f} yOffset={f.level * WALL_H} wallTex={wallTex} />
       ))}
 
-      <OrbitControls makeDefault target={[cx, (maxLevel + 1) * WALL_H * 0.4, cz]} minDistance={1} maxDistance={80} />
+      {/* Target is owned by CameraRig (set imperatively on frame/reset) so the
+          two don't fight; no `target` prop here. */}
+      <OrbitControls ref={controlsRef} makeDefault minDistance={1} maxDistance={80} />
     </>
   );
 }
@@ -205,9 +235,13 @@ class Viewer3DErrorBoundary extends Component<{ children: ReactNode }, { error: 
 // ── Public export ───────────────────────────────────────────────────────────
 
 export function Viewer3D() {
+  // Bumping this re-frames the camera (see CameraRig). The button lives outside
+  // the Canvas, so it talks to the rig through this signal rather than a ref.
+  const [resetSignal, setResetSignal] = useState(0);
+
   return (
     <Viewer3DErrorBoundary>
-    <div style={{ width: '100%', height: '100%', background: '#1a1a1a' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#1a1a1a' }}>
       <Canvas
         shadows="soft"
         camera={{ fov: 45, near: 0.05, far: 500 }}
@@ -220,9 +254,24 @@ export function Viewer3D() {
         }}
         onCreated={({ gl }) => gl.setClearColor('#1a1a1a')}
       >
-        <Scene />
+        <Scene resetSignal={resetSignal} />
         <PostFX />
       </Canvas>
+
+      <button
+        type="button"
+        onClick={() => setResetSignal((n) => n + 1)}
+        title="Reset camera to frame the whole plan"
+        style={{
+          position: 'absolute', top: 12, right: 12,
+          padding: '6px 12px', fontSize: 12, fontWeight: 600,
+          color: '#e2e8f0', background: 'rgba(30,41,59,0.85)',
+          border: '1px solid rgba(148,163,184,0.25)', borderRadius: 8,
+          cursor: 'pointer', backdropFilter: 'blur(4px)',
+        }}
+      >
+        Reset view
+      </button>
     </div>
     </Viewer3DErrorBoundary>
   );
