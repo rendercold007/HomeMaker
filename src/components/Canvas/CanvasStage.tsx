@@ -210,9 +210,9 @@ export function CanvasStage() {
         const margin = theWall.thickness / 2;
         if (wallLen < opWidth + margin * 2) return; // wall too short
 
-        // Center opening on click projection, then clamp to valid range.
-        let offset = bestWall.offset - opWidth / 2;
-        offset = Math.max(margin, Math.min(wallLen - opWidth - margin, offset));
+        // Center the opening on the click projection; addOpening clamps it onto
+        // the wall (the single clamp authority lives in the model).
+        const offset = bestWall.offset - opWidth / 2;
 
         const { plan: newPlan } = addOpening(plan, floorId, {
           wallId: bestWall.id,

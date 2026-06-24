@@ -11,6 +11,19 @@ import { CM, DOOR_H, SILL_H, LINTEL_H } from './constants';
 interface Seg { offset: number; length: number; yMin: number; yMax: number }
 
 /**
+ * Clamp an opening's span to the wall `[0, wallLenCm]`. The single clamp
+ * authority for this file — both the wall segments and the glass/post meshes
+ * derive their geometry from this, so they can never disagree even if a stale
+ * or out-of-range opening slips through. `width <= 0` means it falls entirely
+ * off the wall and should be skipped.
+ */
+function clampSpan(op: Opening, wallLenCm: number): { start: number; end: number; width: number } {
+  const start = Math.max(0, Math.min(wallLenCm, op.offset));
+  const end   = Math.max(0, Math.min(wallLenCm, op.offset + op.width));
+  return { start, end, width: end - start };
+}
+
+/**
  * Split a wall into solid spans + lintel/sill pieces around its openings.
  * Defensive: clamps each opening to the wall and skips any that overlap an
  * already-consumed span, so we never emit a negative-length segment even if a
@@ -23,15 +36,13 @@ function buildSegments(wallLenCm: number, openings: Opening[], wallH: number): S
   let cursor = 0;
 
   for (const op of sorted) {
-    const gapStart = Math.max(0, Math.min(wallLenCm, op.offset));
-    const gapEnd   = Math.max(0, Math.min(wallLenCm, op.offset + op.width));
+    const { start: gapStart, end: gapEnd, width } = clampSpan(op, wallLenCm);
     if (gapStart <= cursor) {
       cursor = Math.max(cursor, gapEnd);
       continue;
     }
     // Solid wall before the opening.
     segs.push({ offset: cursor, length: gapStart - cursor, yMin: 0, yMax: wallH });
-    const width = gapEnd - gapStart;
     if (width > 0) {
       if (op.kind === 'window') {
         segs.push({ offset: gapStart, length: width, yMin: 0,        yMax: SILL_H   });
@@ -99,9 +110,11 @@ export function WallMesh({ wall, quad, pointById, openingsOnWall, wallTex }: {
         </mesh>
       ))}
 
-      {/* Window glass */}
+      {/* Window glass — driven by the clamped span so it matches the wall hole. */}
       {openingsOnWall.filter(o => o.kind === 'window').map((op, i) => {
-        const frac = (op.offset + op.width / 2) / wallLenCm;
+        const { start, width } = clampSpan(op, wallLenCm);
+        if (width <= 0) return null;
+        const frac = (start + width / 2) / wallLenCm;
         const pos: [number, number, number] = [
           (pa.x + frac * (pb.x - pa.x)) * CM,
           (SILL_H + LINTEL_H) / 2,
@@ -109,7 +122,7 @@ export function WallMesh({ wall, quad, pointById, openingsOnWall, wallTex }: {
         ];
         return (
           <mesh key={`g${i}`} position={pos} rotation={[0, -angle, 0]}>
-            <boxGeometry args={[op.width * CM, LINTEL_H - SILL_H, 0.02]} />
+            <boxGeometry args={[width * CM, LINTEL_H - SILL_H, 0.02]} />
             <meshPhysicalMaterial
               color="#a8d4f0"
               transparent
@@ -123,9 +136,11 @@ export function WallMesh({ wall, quad, pointById, openingsOnWall, wallTex }: {
         );
       })}
 
-      {/* Door frame posts */}
-      {openingsOnWall.filter(o => o.kind === 'door').flatMap((op, i) =>
-        [op.offset, op.offset + op.width].map((off, j) => {
+      {/* Door frame posts — placed at the clamped span ends. */}
+      {openingsOnWall.filter(o => o.kind === 'door').flatMap((op, i) => {
+        const { start, end, width } = clampSpan(op, wallLenCm);
+        if (width <= 0) return [];
+        return [start, end].map((off, j) => {
           const frac = off / wallLenCm;
           const pos: [number, number, number] = [
             (pa.x + frac * (pb.x - pa.x)) * CM,
@@ -138,8 +153,8 @@ export function WallMesh({ wall, quad, pointById, openingsOnWall, wallTex }: {
               <meshStandardMaterial color="#8b7355" roughness={0.6} metalness={0.05} />
             </mesh>
           );
-        })
-      )}
+        });
+      })}
     </group>
   );
 }
