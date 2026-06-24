@@ -77,9 +77,10 @@ export function CanvasStage() {
   const [furnitureOverride, setFurnitureOverride] = useState<Record<ID, Vec2>>({});
   const [spaceDown, setSpaceDown] = useState(false);
 
-  const panning = useRef<{ active: boolean; last: Vec2 }>({
+  const panning = useRef<{ active: boolean; last: Vec2; moved: boolean }>({
     active: false,
     last: { x: 0, y: 0 },
+    moved: false,
   });
   const didInitView = useRef(false);
 
@@ -134,9 +135,15 @@ export function CanvasStage() {
       const stage = e.target.getStage();
       if (!stage) return;
 
-      // Pan: middle mouse, or Space + left drag.
-      if (evt.button === 1 || (evt.button === 0 && spaceDown)) {
-        panning.current = { active: true, last: { x: evt.clientX, y: evt.clientY } };
+      // Pan: middle mouse, Space + left drag, or — most discoverably — a plain
+      // left-drag on empty canvas while the Select tool is active.
+      const onEmptyCanvas = e.target === stage;
+      if (
+        evt.button === 1 ||
+        (evt.button === 0 && spaceDown) ||
+        (evt.button === 0 && tool === 'select' && onEmptyCanvas)
+      ) {
+        panning.current = { active: true, last: { x: evt.clientX, y: evt.clientY }, moved: false };
         return;
       }
 
@@ -240,6 +247,7 @@ export function CanvasStage() {
         const dx = evt.clientX - panning.current.last.x;
         const dy = evt.clientY - panning.current.last.y;
         panning.current.last = { x: evt.clientX, y: evt.clientY };
+        panning.current.moved = true;
         setViewport((vp) => panBy(vp, { x: dx, y: dy }));
         return;
       }
@@ -260,6 +268,8 @@ export function CanvasStage() {
 
   const handleClick = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      // A drag-pan ends with a click event — don't treat it as a deselect.
+      if (panning.current.moved) { panning.current.moved = false; return; }
       if (tool === 'select' && e.target === e.target.getStage()) {
         clear();
       }
@@ -389,7 +399,7 @@ export function CanvasStage() {
     : tool === 'window' ? 'Click a wall to place window · Esc to cancel'
     : tool === 'furniture' ? 'Pick an item in the palette, then click to place · Esc to cancel'
     : selection?.kind === 'furniture' ? 'Drag to move · R to rotate · Del to remove'
-    : null;
+    : 'Drag empty space to pan · Scroll to zoom';
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-white">
