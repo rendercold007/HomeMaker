@@ -112,11 +112,16 @@ export function CanvasStage() {
     [candidates, grid.sizeCm, grid.snap, viewport],
   );
 
-  const pointerWorld = (stage: import('konva/lib/Stage').Stage): Vec2 | null => {
-    const ptr = stage.getPointerPosition();
-    if (!ptr) return null;
-    return screenToWorld(ptr, viewport);
-  };
+  // Memoized per-viewport so it's a stable dependency for the mouse handlers
+  // (no churn) while always reading the current pan/zoom.
+  const pointerWorld = useCallback(
+    (stage: import('konva/lib/Stage').Stage): Vec2 | null => {
+      const ptr = stage.getPointerPosition();
+      if (!ptr) return null;
+      return screenToWorld(ptr, viewport);
+    },
+    [viewport],
+  );
 
   /* ----------------------------- Mouse events ---------------------------- */
 
@@ -233,8 +238,7 @@ export function CanvasStage() {
         return;
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [spaceDown, tool, draftStart, snapAt, plan, floorId, viewport, activeFurnitureType, commit, setTool, floor],
+    [spaceDown, tool, draftStart, snapAt, plan, floorId, viewport, activeFurnitureType, commit, setTool, floor, pointerWorld],
   );
 
   const handleMouseMove = useCallback(
@@ -261,7 +265,7 @@ export function CanvasStage() {
         setCursor(null);
       }
     },
-    [tool, draftStart, snapAt, cursor],
+    [tool, draftStart, snapAt, cursor, pointerWorld],
   );
 
   const endPan = useCallback(() => { panning.current.active = false; }, []);

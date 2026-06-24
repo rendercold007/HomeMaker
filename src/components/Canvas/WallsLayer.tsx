@@ -10,7 +10,7 @@ import { Circle, Group, Line } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type { Floor, ID, Opening } from '../../model/types';
 import { distance, type Vec2 } from '../../model/geometry';
-import { computeWallQuads } from '../../model/miter';
+import { computeWallQuads, wallEdgePoint } from '../../model/miter';
 import type { Tool } from '../../state/store';
 
 interface WallsLayerProps {
@@ -94,23 +94,9 @@ export function WallsLayer({
         const wallLen = distance(a, b);
         if (wallLen === 0) return [];
 
-        const [leftA, leftB, rightB, rightA] = quad.corners;
-        const dirx = (b.x - a.x) / wallLen;
-        const diry = (b.y - a.y) / wallLen;
-        const nLx = -diry;
-        const nLy = dirx;
-        const halfT = w.thickness / 2;
-
-        // Edge point at distance d (cm) along the wall on a given side. The true
-        // ends use the mitered corner; interior cuts (at openings) are square.
-        const edge = (d: number, side: 1 | -1): Vec2 => {
-          if (d <= 0) return side === 1 ? leftA : rightA;
-          if (d >= wallLen) return side === 1 ? leftB : rightB;
-          return {
-            x: a.x + dirx * d + side * nLx * halfT,
-            y: a.y + diry * d + side * nLy * halfT,
-          };
-        };
+        // Mitered ends + square interior cuts, shared with the 3D extrusion.
+        const edge = (d: number, side: 1 | -1): Vec2 =>
+          wallEdgePoint(quad, a, b, w.thickness, d, side);
 
         const selected = w.id === selectedWallId;
         const fill = selected ? '#2563eb' : '#1e293b';

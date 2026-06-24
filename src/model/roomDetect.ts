@@ -136,6 +136,51 @@ export function detectRooms(points: readonly Point[], walls: readonly Wall[]): R
   return rooms;
 }
 
+/**
+ * Order a detected room's walls back into a ring of vertex coordinates,
+ * suitable for filling the room as a polygon (2D fill, 3D floor slab).
+ *
+ * Walks the room's wall adjacency rather than sorting vertices by angle — angle
+ * sorting only reproduces the boundary for CONVEX rooms and scrambles concave
+ * (e.g. L-shaped) ones into self-intersecting outlines. The traversal here
+ * recovers the true boundary for any simple room polygon.
+ *
+ * Pure: returns world-cm coordinates in ring order; `[]` if the room can't be
+ * resolved (missing walls/points or fewer than the vertices needed for a face).
+ */
+export function roomRing(
+  room: Room,
+  points: readonly Point[],
+  walls: readonly Wall[],
+): Vec2[] {
+  const pointById = new Map<ID, Vec2>(points.map((p) => [p.id, { x: p.x, y: p.y }]));
+  const wallById = new Map(walls.map((w) => [w.id, w]));
+
+  // Adjacency restricted to this room's walls, then walk the loop.
+  const adj = new Map<ID, ID[]>();
+  for (const wid of room.wallIds) {
+    const w = wallById.get(wid);
+    if (!w) continue;
+    (adj.get(w.a) ?? adj.set(w.a, []).get(w.a)!).push(w.b);
+    (adj.get(w.b) ?? adj.set(w.b, []).get(w.b)!).push(w.a);
+  }
+  const startId = adj.keys().next().value as ID | undefined;
+  if (startId === undefined) return [];
+
+  const ring: ID[] = [startId];
+  let prev: ID | null = null;
+  let cur: ID = startId;
+  for (let i = 0; i < room.wallIds.length; i++) {
+    const neighbors = adj.get(cur) ?? [];
+    const next = neighbors.find((n) => n !== prev);
+    if (next === undefined || next === startId) break;
+    ring.push(next);
+    prev = cur;
+    cur = next;
+  }
+  return ring.map((id) => pointById.get(id)).filter((p): p is Vec2 => p !== undefined);
+}
+
 /** Convenience: return a copy of the floor with its `rooms` field recomputed. */
 export function withDetectedRooms(floor: Floor): Floor {
   return { ...floor, rooms: detectRooms(floor.points, floor.walls) };

@@ -93,6 +93,36 @@ function miterCorner(
 }
 
 /**
+ * Plan-space point on one physical side of a wall, `d` cm along it from endpoint
+ * `a`. The two true ends use the mitered corners from `quad`; interior points
+ * (e.g. the square cuts at openings) sit on the offset edge. Shared by the 2D
+ * renderer and the 3D extrusion so their wall outlines agree exactly.
+ *
+ * `side`: +1 = the wall's left edge (A→B, left = dir rotated +90°); -1 = right.
+ */
+export function wallEdgePoint(
+  quad: WallQuad,
+  a: Vec2,
+  b: Vec2,
+  thickness: number,
+  d: number,
+  side: 1 | -1,
+): Vec2 {
+  const [leftA, leftB, rightB, rightA] = quad.corners;
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len === 0 || d <= 0) return side === 1 ? leftA : rightA;
+  if (d >= len) return side === 1 ? leftB : rightB;
+  const dirx = (b.x - a.x) / len;
+  const diry = (b.y - a.y) / len;
+  const halfT = thickness / 2;
+  // Left normal of dir (dir rotated +90°): (-diry, dirx).
+  return {
+    x: a.x + dirx * d + side * -diry * halfT,
+    y: a.y + diry * d + side * dirx * halfT,
+  };
+}
+
+/**
  * Compute the mitered quad for every wall in the graph. Walls whose endpoints
  * are missing or coincident are skipped. The result is keyed by wall id.
  */

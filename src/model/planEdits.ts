@@ -214,7 +214,15 @@ export function deletePoint(plan: Plan, floorId: ID, pointId: ID): Plan {
 export const DEFAULT_DOOR_WIDTH = 90;
 export const DEFAULT_WINDOW_WIDTH = 120;
 
-/** Add a door or window opening to a wall. Returns the new plan and the opening id. */
+/**
+ * Add a door or window opening to a wall. The model enforces its own invariants
+ * rather than trusting the caller: the opening must reference a real wall, have
+ * positive width that fits the wall (minus end margins), and not overlap an
+ * existing opening. The `offset` is clamped so the whole opening stays on the
+ * wall, clear of the mitered ends.
+ *
+ * On a rejected opening the plan is returned unchanged and `openingId` is `''`.
+ */
 export function addOpening(
   plan: Plan,
   floorId: ID,
@@ -222,8 +230,39 @@ export function addOpening(
   newId: IdGen = defaultNewId,
 ): { plan: Plan; openingId: ID } {
   const floor = getFloor(plan, floorId);
+
+  const wall = floor.walls.find((w) => w.id === opening.wallId);
+  if (!wall) return { plan, openingId: '' };
+  const pa = floor.points.find((p) => p.id === wall.a);
+  const pb = floor.points.find((p) => p.id === wall.b);
+  if (!pa || !pb) return { plan, openingId: '' };
+
+  const wallLen = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+  const margin = wall.thickness / 2;
+  const maxWidth = wallLen - margin * 2;
+
+  // Width must be positive and physically fit within the wall.
+  if (opening.width <= 0 || maxWidth <= 0 || opening.width > maxWidth) {
+    return { plan, openingId: '' };
+  }
+
+  // Keep the whole span on the wall, clear of the (mitered) ends.
+  const offset = Math.max(
+    margin,
+    Math.min(wallLen - opening.width - margin, opening.offset),
+  );
+
+  // Reject overlaps with existing openings on the same wall.
+  const overlaps = floor.openings.some(
+    (o) =>
+      o.wallId === opening.wallId &&
+      offset < o.offset + o.width &&
+      o.offset < offset + opening.width,
+  );
+  if (overlaps) return { plan, openingId: '' };
+
   const id = newId();
-  const full: Opening = { id, ...opening };
+  const full: Opening = { id, ...opening, offset };
   const next: Floor = { ...floor, openings: [...floor.openings, full] };
   return { plan: withFloor(plan, floorId, next), openingId: id };
 }

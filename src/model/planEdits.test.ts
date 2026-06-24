@@ -10,6 +10,7 @@ import {
   setRoomType,
   addFloor,
   deleteFloor,
+  addOpening,
 } from './planEdits';
 import type { ID, Plan } from './types';
 
@@ -224,5 +225,70 @@ describe('deleteWall orphan cleanup', () => {
     expect(after.floors[0]!.walls).toHaveLength(0);
     expect(after.floors[0]!.points).toHaveLength(0); // both orphans removed
     expect(startId).toBeDefined();
+  });
+});
+
+describe('addOpening validation', () => {
+  /** A single 400cm horizontal wall (thickness 10) ready for openings. */
+  function wallPlan(): { plan: Plan; floorId: ID; wallId: ID } {
+    const { plan, floorId } = freshPlan();
+    const { plan: next } = drawWall(plan, floorId, { x: 0, y: 0 }, { x: 400, y: 0 }, 10, counter('g'));
+    return { plan: next, floorId, wallId: next.floors[0]!.walls[0]!.id };
+  }
+
+  it('adds a valid opening and clamps nothing in range', () => {
+    const { plan, floorId, wallId } = wallPlan();
+    const { plan: next, openingId } = addOpening(
+      plan, floorId,
+      { wallId, kind: 'door', offset: 100, width: 90 },
+      counter('o'),
+    );
+    expect(openingId).not.toBe('');
+    const ops = next.floors[0]!.openings;
+    expect(ops).toHaveLength(1);
+    expect(ops[0]!.offset).toBe(100);
+  });
+
+  it('rejects an opening referencing a missing wall', () => {
+    const { plan, floorId } = wallPlan();
+    const { plan: next, openingId } = addOpening(
+      plan, floorId,
+      { wallId: 'nope', kind: 'door', offset: 0, width: 90 },
+    );
+    expect(openingId).toBe('');
+    expect(next).toBe(plan); // unchanged
+  });
+
+  it('rejects a non-positive or oversized width', () => {
+    const { plan, floorId, wallId } = wallPlan();
+    expect(addOpening(plan, floorId, { wallId, kind: 'door', offset: 0, width: 0 }).openingId).toBe('');
+    expect(addOpening(plan, floorId, { wallId, kind: 'door', offset: 0, width: 500 }).openingId).toBe('');
+  });
+
+  it('clamps an out-of-range offset back onto the wall', () => {
+    const { plan, floorId, wallId } = wallPlan();
+    const { plan: next } = addOpening(
+      plan, floorId,
+      { wallId, kind: 'window', offset: 9999, width: 120 },
+      counter('o'),
+    );
+    const op = next.floors[0]!.openings[0]!;
+    // wallLen 400, width 120, margin 5 → max offset = 400 - 120 - 5 = 275.
+    expect(op.offset).toBe(275);
+  });
+
+  it('rejects an opening that overlaps an existing one', () => {
+    const { plan, floorId, wallId } = wallPlan();
+    const { plan: withFirst } = addOpening(
+      plan, floorId,
+      { wallId, kind: 'door', offset: 100, width: 90 },
+      counter('o'),
+    );
+    const { plan: after, openingId } = addOpening(
+      withFirst, floorId,
+      { wallId, kind: 'window', offset: 150, width: 120 }, // overlaps [100,190]
+    );
+    expect(openingId).toBe('');
+    expect(after.floors[0]!.openings).toHaveLength(1);
   });
 });

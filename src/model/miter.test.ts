@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeWallQuads } from './miter';
+import { computeWallQuads, wallEdgePoint } from './miter';
 import type { Point, Wall } from './types';
 import type { Vec2 } from './geometry';
 
@@ -81,5 +81,23 @@ describe('computeWallQuads', () => {
     const c3 = w1.corners[3];
     expect(Math.hypot(c0.x, c0.y)).toBeLessThanOrEqual(30 + 1e-6);
     expect(Math.hypot(c3.x, c3.y)).toBeLessThanOrEqual(30 + 1e-6);
+  });
+});
+
+describe('wallEdgePoint', () => {
+  const a: Vec2 = { x: 0, y: 0 };
+  const b: Vec2 = { x: 100, y: 0 };
+  const quad = computeWallQuads([pt('A', 0, 0), pt('B', 100, 0)], [wall('w', 'A', 'B', 10)]).get('w')!;
+
+  it('returns the mitered end corners at or past the wall ends', () => {
+    near(wallEdgePoint(quad, a, b, 10, 0, 1), [0, 5]);    // leftA
+    near(wallEdgePoint(quad, a, b, 10, -5, 1), [0, 5]);   // before A clamps to leftA
+    near(wallEdgePoint(quad, a, b, 10, 100, 1), [100, 5]); // leftB
+    near(wallEdgePoint(quad, a, b, 10, 999, -1), [100, -5]); // past B clamps to rightB
+  });
+
+  it('returns square offset points in the interior', () => {
+    near(wallEdgePoint(quad, a, b, 10, 50, 1), [50, 5]);
+    near(wallEdgePoint(quad, a, b, 10, 50, -1), [50, -5]);
   });
 });

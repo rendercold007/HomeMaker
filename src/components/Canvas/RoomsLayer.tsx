@@ -5,8 +5,9 @@
  * walking each room's wall list back into an ordered point ring.
  */
 import { Group, Line, Text } from 'react-konva';
-import type { Floor, ID, Room } from '../../model/types';
+import type { Floor, ID } from '../../model/types';
 import { signedPolygonArea, type Vec2 } from '../../model/geometry';
+import { roomRing } from '../../model/roomDetect';
 import { formatArea } from '../../lib/units';
 
 interface RoomsLayerProps {
@@ -15,38 +16,6 @@ interface RoomsLayerProps {
   interactive: boolean;
   selectedRoomId: ID | null;
   onSelectRoom: (id: ID) => void;
-}
-
-/** Order a room's walls into a ring of points for filling. */
-function roomRing(room: Room, floor: Floor): Vec2[] {
-  const pointById = new Map<ID, Vec2>(
-    floor.points.map((p) => [p.id, { x: p.x, y: p.y }]),
-  );
-  const wallById = new Map(floor.walls.map((w) => [w.id, w]));
-
-  // Build adjacency restricted to this room's walls, then walk the loop.
-  const adj = new Map<ID, ID[]>();
-  for (const wid of room.wallIds) {
-    const w = wallById.get(wid);
-    if (!w) continue;
-    (adj.get(w.a) ?? adj.set(w.a, []).get(w.a)!).push(w.b);
-    (adj.get(w.b) ?? adj.set(w.b, []).get(w.b)!).push(w.a);
-  }
-  const startId = adj.keys().next().value as ID | undefined;
-  if (startId === undefined) return [];
-
-  const ring: ID[] = [startId];
-  let prev: ID | null = null;
-  let cur: ID = startId;
-  for (let i = 0; i < room.wallIds.length; i++) {
-    const neighbors = adj.get(cur) ?? [];
-    const next = neighbors.find((n) => n !== prev);
-    if (next === undefined || next === startId) break;
-    ring.push(next);
-    prev = cur;
-    cur = next;
-  }
-  return ring.map((id) => pointById.get(id)!).filter(Boolean);
 }
 
 function centroid(pts: Vec2[]): Vec2 {
@@ -67,7 +36,7 @@ export function RoomsLayer({
   return (
     <Group>
       {floor.rooms.map((room) => {
-        const ring = roomRing(room, floor);
+        const ring = roomRing(room, floor.points, floor.walls);
         if (ring.length < 3) return null;
         const flat = ring.flatMap((p) => [p.x, p.y]);
         const c = centroid(ring);

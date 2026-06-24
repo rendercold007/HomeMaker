@@ -1,0 +1,3 @@
+- [Codebase map & contracts](codebase-map.md) — where the model/state/canvas/3D modules live and what they expose
+- [Known fragile areas](fragile-areas.md) — geometry/room/miter spots that get edits wrong; scrutinize harder
+- [Scope & build gaps](scope-and-tooling.md) — byelaws dead code, no ESLint, CLAUDE.md scope drift
