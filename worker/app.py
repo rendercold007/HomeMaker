@@ -24,8 +24,15 @@ import os
 from fastapi import FastAPI, Request
 
 from contract import parse_request
+from edits import apply_edits, summarize_floor
 from layout import RoomRequest, generate_plan
-from llm import DEFAULT_MODEL, extract_room_program, extract_shopping_list, make_client
+from llm import (
+    DEFAULT_MODEL,
+    extract_edit_commands,
+    extract_room_program,
+    extract_shopping_list,
+    make_client,
+)
 from pipeline import auto_furnish
 
 app = FastAPI(title="HomeMaker AI worker")
@@ -80,3 +87,25 @@ async def generate_plan_route(request: Request) -> dict:
         RoomRequest("Room", "living", 1)
     ]
     return generate_plan((0, 0, width, depth), rooms)
+
+
+@app.post("/edit-plan")
+async def edit_plan_route(request: Request) -> dict:
+    """Apply a chat-driven edit to an existing floor (v1 — local edits).
+
+    Takes { prompt, floor } where `floor` is the current active floor in cm
+    (points/walls/openings/furniture/rooms). The LLM produces edit COMMANDS
+    against a summary of that floor; edits.apply_edits resolves them to a
+    concrete id-level patch the frontend commits as one undo step. Structural
+    requests (resize/add/remove room) are reported in `warnings` — see
+    docs/IterativeEditing.md.
+    """
+    data = await request.json()
+    prompt = str(data.get("prompt", ""))
+    floor = data.get("floor") or {}
+
+    client = _get_client()
+    commands = extract_edit_commands(
+        prompt, summarize_floor(floor), client=client, model=MODEL
+    )
+    return apply_edits(floor, commands)

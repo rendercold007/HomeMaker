@@ -1,19 +1,22 @@
 /**
- * AssistantPanel — Phase 4 entry point (chat → furnished plan).
+ * AssistantPanel — Phase 4 entry point (chat → editable plan).
  *
- * A prompt box with two actions: "Generate plan" (whole multi-room floor plan)
- * and "Auto-furnish" (furniture for the current room). Both POST the prompt to
- * the worker, which the LLM consumes to drive the layout/shopping list. Each
- * result is committed to the store as ONE undo step, so 2D and 3D update from the
+ * A prompt box with three actions: "Generate plan" (whole multi-room floor
+ * plan), "Edit plan" (chat-driven edits to the existing plan — "add a window to
+ * the kitchen", "rename bedroom 2 to a study"; see docs/IterativeEditing.md), and
+ * "Auto-furnish" (furniture for the current room). Each POSTs to the worker and
+ * commits its result to the store as ONE undo step, so 2D and 3D update from the
  * same Plan. With the worker offline, auto-furnish falls back to the step-1 mock;
- * plan generation requires the worker. See src/lib/aiPipeline/client.ts.
+ * generate and edit require the worker. See src/lib/aiPipeline/client.ts.
  */
 import { useState } from 'react';
 import { usePlan, useActiveFloor } from '../../state/store';
-import { requestAutoFurnish, requestGeneratePlan } from '../../lib/aiPipeline/client';
+import { requestAutoFurnish, requestEditPlan, requestGeneratePlan } from '../../lib/aiPipeline/client';
 import { applyGeneratedFurniture } from '../../lib/aiPipeline/applyGenerated';
 import { applyGeneratedPlan } from '../../lib/aiPipeline/applyPlan';
-import type { AutoFurnishRequest, GeneratePlanRequest } from '../../lib/aiPipeline/contract';
+import { applyEditPatch } from '../../lib/aiPipeline/applyEditPatch';
+import type { AutoFurnishRequest, EditPlanRequest, GeneratePlanRequest } from '../../lib/aiPipeline/contract';
+import { serializeFloor } from '../../lib/aiPipeline/contract';
 import { DEFAULT_WALL_HEIGHT } from '../../model/planEdits';
 
 const CM_PER_M = 100;
@@ -24,11 +27,17 @@ export function AssistantPanel() {
   const [prompt, setPrompt] = useState('A 2BHK apartment');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ summary: string; warnings: string[] } | null>(null);
+
+  const activeFloor = plan.floors.find((f) => f.id === activeFloorId);
+  // Editing only makes sense once there's a plan to edit (derived rooms exist).
+  const canEdit = (activeFloor?.rooms.length ?? 0) > 0;
 
   // Wrap an async action with shared loading/error state.
   async function run(action: () => Promise<void>) {
     setStatus('loading');
     setError(null);
+    setResult(null);
     try {
       await action();
       setStatus('idle');
@@ -69,6 +78,19 @@ export function AssistantPanel() {
     });
   }
 
+  // Edit the existing plan by chat ("add a window to the kitchen", "rename
+  // bedroom 2 to a study"). Sends the current floor; commits the returned patch
+  // as one undo step.
+  function handleEdit() {
+    if (!activeFloor) return;
+    const req: EditPlanRequest = { prompt, floor: serializeFloor(activeFloor) };
+    return run(async () => {
+      const res = await requestEditPlan(req);
+      commit((current) => applyEditPatch(current, activeFloorId, res));
+      setResult({ summary: res.summary, warnings: res.warnings });
+    });
+  }
+
   const loading = status === 'loading';
 
   return (
@@ -100,6 +122,15 @@ export function AssistantPanel() {
       </button>
       <button
         type="button"
+        onClick={handleEdit}
+        disabled={loading || !canEdit || prompt.trim().length === 0}
+        title={canEdit ? undefined : 'Generate a plan first, then edit it by chat.'}
+        className="flex items-center justify-center gap-2 rounded-md border border-indigo-400/40 bg-white/5 px-3 py-2 text-xs font-semibold text-indigo-200 transition hover:bg-white/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        ✏️ Edit plan
+      </button>
+      <button
+        type="button"
         onClick={handleFurnish}
         disabled={loading || prompt.trim().length === 0}
         className="flex items-center justify-center gap-2 rounded-md border border-indigo-400/40 bg-white/5 px-3 py-2 text-xs font-semibold text-indigo-200 transition hover:bg-white/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
@@ -111,8 +142,17 @@ export function AssistantPanel() {
         <p className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-300">{error}</p>
       )}
 
+      {result && (
+        <div className="space-y-1 rounded bg-white/5 px-2 py-1.5 text-[11px] text-slate-300">
+          <p>{result.summary}</p>
+          {result.warnings.map((w, i) => (
+            <p key={i} className="text-amber-300/90">⚠ {w}</p>
+          ))}
+        </div>
+      )}
+
       <p className="mt-auto text-[10px] leading-snug text-slate-500">
-        Generate replaces this floor; Furnish adds to it. Both are one undo step — switch to 3D to walk it.
+        Generate replaces this floor; Edit changes it by chat ("add a window to the kitchen"); Furnish adds furniture. Each is one undo step — switch to 3D to walk it.
       </p>
     </aside>
   );

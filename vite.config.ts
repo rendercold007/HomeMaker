@@ -11,8 +11,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
  * (WORKER_URL base, default http://localhost:8000):
  *   POST /api/design/auto-furnish  → {base}/auto-furnish  (furniture only)
  *   POST /api/design/generate-plan → {base}/generate-plan (whole floor plan)
+ *   POST /api/design/edit-plan     → {base}/edit-plan     (chat edit → patch)
  * If the worker is offline, auto-furnish falls back to the step-1 mock so the UI
- * still works; plan generation can't be mocked, so it reports the worker is down.
+ * still works; plan generation and editing can't be mocked, so they report the
+ * worker is down.
  * Production uses the matching Vercel functions in api/design/. Wire shapes:
  * src/lib/aiPipeline/contract.ts.
  */
@@ -21,6 +23,7 @@ const WORKER_BASE = (process.env.WORKER_URL ?? 'http://localhost:8000').replace(
 const ROUTES: Record<string, string> = {
   '/api/design/auto-furnish': '/auto-furnish',
   '/api/design/generate-plan': '/generate-plan',
+  '/api/design/edit-plan': '/edit-plan',
 };
 
 const MOCK_AUTO_FURNISH = {
@@ -68,8 +71,8 @@ function aiWorkerApi(): Plugin {
         res.statusCode = 200; // worker offline → step-1 mock keeps the UI working
         res.end(JSON.stringify(MOCK_AUTO_FURNISH));
       } else {
-        res.statusCode = 503; // plan generation needs the worker — can't be mocked
-        res.end(JSON.stringify({ error: 'AI worker offline — start the worker to generate a plan.' }));
+        res.statusCode = 503; // generate-plan / edit-plan need the worker — can't be mocked
+        res.end(JSON.stringify({ error: 'AI worker offline — start the worker to generate or edit a plan.' }));
       }
     }
   };

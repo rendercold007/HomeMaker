@@ -206,3 +206,73 @@ def extract_room_program(prompt: str, *, client, model: str) -> list[RoomProgram
         temperature=0.4,
     )
     return parse_room_program(response.choices[0].message.content or "")
+
+
+# --------------------------------------------------------------------------- #
+# Iterative editing: extract EDIT COMMANDS against an existing floor           #
+# --------------------------------------------------------------------------- #
+#
+# The LLM edits an existing plan by naming WHAT to change (which room, what to
+# add/remove), referencing rooms by their name/type from the floor summary —
+# never coordinates. edits.apply_edits resolves these to a concrete patch.
+
+# The v1 command vocabulary (local edits). Structural intents (resize/add/remove
+# a room) are emitted as {"op": "unsupported"} and reported to the user.
+ALLOWED_EDIT_OPS = (
+    "add_furniture",    # {room, items: [{type, style?, rule?}]}
+    "remove_furniture", # {room?, match: <type|"all">}
+    "add_opening",      # {room, kind: door|window, wall: exterior|interior|<room>}
+    "remove_opening",   # {room, kind?: door|window}
+    "rename_room",      # {room, name}
+    "set_room_type",    # {room, type}
+)
+
+
+def build_edit_prompt(floor_summary: str, types: list[str] | None = None) -> str:
+    types = types or allowed_types()
+    return (
+        "You are editing an EXISTING floor plan. The user asks for a change in "
+        "natural language; you translate it into a list of edit commands. Reason "
+        "about intent only — NEVER output coordinates, sizes, or positions.\n\n"
+        "The current floor:\n"
+        f"{floor_summary}\n\n"
+        "Respond with JSON ONLY:\n"
+        '{"commands": [ { "op": "<op>", ... } ]}\n\n'
+        "Available ops and their fields:\n"
+        '- add_furniture    {"room": "<room name or type>", "items": [{"type": "<type>", "style": "<word>", "rule": "<rule>"}]}\n'
+        '- remove_furniture {"room": "<room>", "match": "<type or \\"all\\">"}  (room optional)\n'
+        '- add_opening      {"room": "<room>", "kind": "door"|"window", "wall": "exterior"|"interior"|"<neighbor room>"}\n'
+        '- remove_opening   {"room": "<room>", "kind": "door"|"window"}  (kind optional)\n'
+        '- rename_room      {"room": "<room>", "name": "<new name>"}\n'
+        '- set_room_type    {"room": "<room>", "type": "<type>"}\n\n'
+        f'Reference rooms by a name or type shown above. "type" for furniture MUST be one of: {", ".join(types)}.\n'
+        f'Furniture "rule" MUST be one of: {", ".join(ALLOWED_RULES)}.\n'
+        f'Room "type" MUST be one of: {", ".join(ROOM_TYPES)}.\n'
+        "You may return several commands (e.g. to re-style a room: remove_furniture "
+        'with match "all", then add_furniture with the new items).\n'
+        'If the request needs resizing, adding, or removing a ROOM (changing walls), '
+        'return {"op": "unsupported"} for it — that is not available yet.\n'
+        "Output nothing but the JSON object."
+    )
+
+
+def parse_edit_commands(content: str) -> list[dict]:
+    """Parse the LLM reply into a list of command dicts (each with an 'op')."""
+    data = _extract_json(content)
+    cmds = data.get("commands") if isinstance(data, dict) else data
+    if not isinstance(cmds, list):
+        return []
+    return [c for c in cmds if isinstance(c, dict) and str(c.get("op", "")).strip()]
+
+
+def extract_edit_commands(prompt: str, floor_summary: str, *, client, model: str) -> list[dict]:
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": build_edit_prompt(floor_summary)},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.3,
+    )
+    return parse_edit_commands(response.choices[0].message.content or "")

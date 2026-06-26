@@ -9,12 +9,15 @@
 import type {
   AutoFurnishRequest,
   AutoFurnishResponse,
+  EditPlanRequest,
+  EditPlanResponse,
   GeneratePlanRequest,
   GeneratedPlan,
 } from './contract';
 
 export const AUTO_FURNISH_ENDPOINT = '/api/design/auto-furnish';
 export const GENERATE_PLAN_ENDPOINT = '/api/design/generate-plan';
+export const EDIT_PLAN_ENDPOINT = '/api/design/edit-plan';
 
 export async function requestAutoFurnish(
   req: AutoFurnishRequest,
@@ -46,4 +49,20 @@ export async function requestGeneratePlan(
     throw new Error(`Plan generation failed: ${res.status} ${res.statusText}`);
   }
   return (await res.json()) as GeneratedPlan;
+}
+
+export async function requestEditPlan(
+  req: EditPlanRequest,
+  signal?: AbortSignal,
+): Promise<EditPlanResponse> {
+  const res = await fetch(EDIT_PLAN_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`Edit failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as EditPlanResponse;
 }

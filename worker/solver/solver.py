@@ -284,6 +284,8 @@ def solve(req: SolveRequest) -> SolveResult:
     grid = [[False] * cols for _ in range(rows)]
     for door in req.doors:
         _occupy(grid, door_swing_box(door, req.room), cell)
+    for box in req.obstacles:  # furniture already in the room (edit add) stays put
+        _occupy(grid, box, cell)
 
     placements: list[Placement] = []
     unplaced: list[str] = []

@@ -102,6 +102,10 @@ class SolveRequest:
     windows: list[Window] = field(default_factory=list)
     cell_cm: float = 10.0
     clearance_cm: float = 0.0  # min gap from walls; 0 allows flush placement
+    # Pre-occupied AABBs (room-local cm: min_x, min_y, max_x, max_y) that new
+    # items must avoid — e.g. furniture already in the room during an edit. Same
+    # mechanism as door swings; empty by default so generation is unaffected.
+    obstacles: list[tuple[float, float, float, float]] = field(default_factory=list)
 
 
 @dataclass

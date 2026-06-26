@@ -21,7 +21,7 @@ const ROOM_TYPES: readonly RoomType[] = [
   'study', 'utility', 'pooja', 'parking', 'other',
 ];
 
-function asRoomType(t: string): RoomType {
+export function asRoomType(t: string): RoomType {
   return (ROOM_TYPES as readonly string[]).includes(t) ? (t as RoomType) : 'other';
 }
 
