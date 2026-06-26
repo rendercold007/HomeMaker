@@ -25,7 +25,12 @@ from catalog import allowed_types
 from contract import RoomSpec
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "openai/gpt-4o-mini"  # override with LLM_MODEL; any OpenRouter slug works
+DEFAULT_MODEL = "openai/gpt-4o-mini"  # generate / furnish; override with LLM_MODEL
+# Editing — especially detecting STRUCTURAL intent ("make the kitchen bigger" →
+# resize_room) and not re-issuing already-applied edits — needs stronger
+# instruction-following than gpt-4o-mini reliably gives, so editing defaults to
+# gpt-4o. Override with EDIT_LLM_MODEL (or LLM_MODEL for everything).
+DEFAULT_EDIT_MODEL = "openai/gpt-4o"
 
 # The rules the solver understands (see solver/models.py). `next_to:<type>`
 # references an earlier item's type; the pipeline resolves it to that item's id.
@@ -216,15 +221,21 @@ def extract_room_program(prompt: str, *, client, model: str) -> list[RoomProgram
 # add/remove), referencing rooms by their name/type from the floor summary —
 # never coordinates. edits.apply_edits resolves these to a concrete patch.
 
-# The v1 command vocabulary (local edits). Structural intents (resize/add/remove
-# a room) are emitted as {"op": "unsupported"} and reported to the user.
+# The edit command vocabulary. Local ops (edits.py) change furniture / openings /
+# room labels; structural ops (restructure.py, v2) re-flow the wall partition.
 ALLOWED_EDIT_OPS = (
+    # Local edits
     "add_furniture",    # {room, items: [{type, style?, rule?}]}
     "remove_furniture", # {room?, match: <type|"all">}
     "add_opening",      # {room, kind: door|window, wall: exterior|interior|<room>}
     "remove_opening",   # {room, kind?: door|window}
     "rename_room",      # {room, name}
     "set_room_type",    # {room, type}
+    # Structural edits (re-flow the partition within the same footprint)
+    "resize_room",      # {room, change: bigger|smaller} or {room, factor: <number>}
+    "add_room",         # {name, type}
+    "remove_room",      # {room}
+    "swap_rooms",       # {room, with}
 )
 
 
@@ -238,20 +249,33 @@ def build_edit_prompt(floor_summary: str, types: list[str] | None = None) -> str
         f"{floor_summary}\n\n"
         "Respond with JSON ONLY:\n"
         '{"commands": [ { "op": "<op>", ... } ]}\n\n'
-        "Available ops and their fields:\n"
+        "LOCAL ops (change what's inside rooms):\n"
         '- add_furniture    {"room": "<room name or type>", "items": [{"type": "<type>", "style": "<word>", "rule": "<rule>"}]}\n'
         '- remove_furniture {"room": "<room>", "match": "<type or \\"all\\">"}  (room optional)\n'
         '- add_opening      {"room": "<room>", "kind": "door"|"window", "wall": "exterior"|"interior"|"<neighbor room>"}\n'
         '- remove_opening   {"room": "<room>", "kind": "door"|"window"}  (kind optional)\n'
         '- rename_room      {"room": "<room>", "name": "<new name>"}\n'
-        '- set_room_type    {"room": "<room>", "type": "<type>"}\n\n'
+        '- set_room_type    {"room": "<room>", "type": "<type>"}\n'
+        "STRUCTURAL ops (resize the walls / change which rooms exist):\n"
+        '- resize_room      {"room": "<room>", "change": "bigger"|"smaller"}\n'
+        '- add_room         {"name": "<label>", "type": "<type>"}\n'
+        '- remove_room      {"room": "<room>"}\n'
+        '- swap_rooms       {"room": "<room>", "with": "<other room>"}\n\n'
         f'Reference rooms by a name or type shown above. "type" for furniture MUST be one of: {", ".join(types)}.\n'
         f'Furniture "rule" MUST be one of: {", ".join(ALLOWED_RULES)}.\n'
         f'Room "type" MUST be one of: {", ".join(ROOM_TYPES)}.\n'
         "You may return several commands (e.g. to re-style a room: remove_furniture "
         'with match "all", then add_furniture with the new items).\n'
-        'If the request needs resizing, adding, or removing a ROOM (changing walls), '
-        'return {"op": "unsupported"} for it — that is not available yet.\n'
+        "Use a STRUCTURAL op when the request changes the rooms themselves: "
+        '"make the kitchen bigger" → resize_room; "add a study" → add_room; '
+        '"delete the balcony" → remove_room; "swap the kitchen and dining" → '
+        "swap_rooms. Use a LOCAL op when it only changes furniture, doors, "
+        "windows, or a room's name/type.\n"
+        "Produce commands ONLY for the latest request. Any earlier messages are "
+        'context for resolving references like "it" or "the other room" — do NOT '
+        "re-issue edits that were already applied in previous turns.\n"
+        'If you truly can\'t express the request with the ops above, return '
+        'exactly {"commands": [{"op": "unsupported"}]} — never an empty list.\n'
         "Output nothing but the JSON object."
     )
 
@@ -265,13 +289,48 @@ def parse_edit_commands(content: str) -> list[dict]:
     return [c for c in cmds if isinstance(c, dict) and str(c.get("op", "")).strip()]
 
 
-def extract_edit_commands(prompt: str, floor_summary: str, *, client, model: str) -> list[dict]:
+# How many prior turns to feed back as conversation context. Enough for "make it
+# bigger" / "the other one" to resolve, bounded so the prompt stays small.
+MAX_EDIT_HISTORY = 8
+
+
+def build_edit_messages(
+    prompt: str, floor_summary: str, history: list[dict] | None = None
+) -> list[dict]:
+    """Chat messages for an edit turn, with recent turns replayed as context.
+
+    Each history entry is {"prompt": <what the user asked>, "summary": <what we
+    did>}; we replay them as user/assistant turns so the model can resolve
+    references like "it" or "the other bedroom" against the conversation, not
+    just the current floor. The floor summary in the system prompt is always the
+    LATEST floor, so stale history never overrides current geometry.
+    """
+    messages: list[dict] = [{"role": "system", "content": build_edit_prompt(floor_summary)}]
+    for turn in (history or [])[-MAX_EDIT_HISTORY:]:
+        if not isinstance(turn, dict):
+            continue
+        past_prompt = str(turn.get("prompt", "")).strip()
+        past_summary = str(turn.get("summary", "")).strip()
+        if not past_prompt:
+            continue
+        messages.append({"role": "user", "content": past_prompt})
+        if past_summary:
+            messages.append({"role": "assistant", "content": past_summary})
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+def extract_edit_commands(
+    prompt: str,
+    floor_summary: str,
+    *,
+    client,
+    model: str,
+    history: list[dict] | None = None,
+) -> list[dict]:
     response = client.chat.completions.create(
         model=model,
-        messages=[
-            {"role": "system", "content": build_edit_prompt(floor_summary)},
-            {"role": "user", "content": prompt},
-        ],
+        messages=build_edit_messages(prompt, floor_summary, history),
         response_format={"type": "json_object"},
         temperature=0.3,
     )

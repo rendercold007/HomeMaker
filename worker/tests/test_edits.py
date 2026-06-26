@@ -128,11 +128,19 @@ class TestApplyEdits(unittest.TestCase):
             {"op": "setRoomType", "roomId": "roomB", "type": "study"},
         ])
 
-    def test_structural_request_warns_and_makes_no_change(self):
-        res = apply_edits(_floor(), [
-            {"op": "resize_room", "room": "Living"},
-            {"op": "unsupported"},
-        ])
+    def test_structural_resize_reflows_into_replace_floor(self):
+        # v2: a resize re-flows the partition and comes back as one replaceFloor
+        # op (a whole new floor), not a warning.
+        res = apply_edits(_floor(), [{"op": "resize_room", "room": "Living", "change": "bigger"}])
+        self.assertEqual([op["op"] for op in res["patch"]], ["replaceFloor"])
+        floor = res["patch"][0]
+        self.assertEqual({r["name"] for r in floor["rooms"]}, {"Living", "Bedroom"})
+        self.assertTrue(res["summary"].lower().startswith("enlarged"))
+        self.assertFalse(res["warnings"])
+
+    def test_move_room_still_warns(self):
+        # move_room is the one structural intent v2 doesn't implement.
+        res = apply_edits(_floor(), [{"op": "move_room", "room": "Living"}])
         self.assertEqual(res["patch"], [])
         self.assertTrue(res["warnings"])
 

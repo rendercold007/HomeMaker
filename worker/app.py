@@ -9,7 +9,8 @@ Run it:
     cd worker
     pip install -r requirements.txt
     export OPENROUTER_API_KEY=sk-or-...        # your OpenRouter key
-    export LLM_MODEL=openai/gpt-4o-mini        # optional; any OpenRouter slug
+    export LLM_MODEL=openai/gpt-4o-mini        # optional; generate/furnish model
+    export EDIT_LLM_MODEL=openai/gpt-4o        # optional; editing model (defaults to gpt-4o)
     uvicorn app:app --reload --port 8000
 
 The Node gateway (vite.config.ts dev middleware / api/design/auto-furnish.ts)
@@ -27,6 +28,7 @@ from contract import parse_request
 from edits import apply_edits, summarize_floor
 from layout import RoomRequest, generate_plan
 from llm import (
+    DEFAULT_EDIT_MODEL,
     DEFAULT_MODEL,
     extract_edit_commands,
     extract_room_program,
@@ -37,7 +39,11 @@ from pipeline import auto_furnish
 
 app = FastAPI(title="HomeMaker AI worker")
 
+# Generate / furnish use the cheaper model; editing defaults to a stronger one
+# for structural-intent detection. Precedence for editing: EDIT_LLM_MODEL wins,
+# then a global LLM_MODEL override, then the gpt-4o default.
 MODEL = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+EDIT_MODEL = os.environ.get("EDIT_LLM_MODEL") or os.environ.get("LLM_MODEL") or DEFAULT_EDIT_MODEL
 
 _client = None
 
@@ -51,7 +57,7 @@ def _get_client():
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": MODEL}
+    return {"status": "ok", "model": MODEL, "editModel": EDIT_MODEL}
 
 
 @app.post("/auto-furnish")
@@ -93,19 +99,21 @@ async def generate_plan_route(request: Request) -> dict:
 async def edit_plan_route(request: Request) -> dict:
     """Apply a chat-driven edit to an existing floor (v1 — local edits).
 
-    Takes { prompt, floor } where `floor` is the current active floor in cm
-    (points/walls/openings/furniture/rooms). The LLM produces edit COMMANDS
-    against a summary of that floor; edits.apply_edits resolves them to a
-    concrete id-level patch the frontend commits as one undo step. Structural
-    requests (resize/add/remove room) are reported in `warnings` — see
-    docs/IterativeEditing.md.
+    Takes { prompt, floor, history? } where `floor` is the current active floor
+    in cm (points/walls/openings/furniture/rooms) and `history` is the recent
+    (prompt, summary) turns for conversational reference resolution ("make it
+    bigger"). The LLM produces edit COMMANDS against a summary of that floor;
+    edits.apply_edits resolves them to a concrete id-level patch the frontend
+    commits as one undo step. Structural requests (resize/add/remove room) are
+    reported in `warnings` — see docs/IterativeEditing.md.
     """
     data = await request.json()
     prompt = str(data.get("prompt", ""))
     floor = data.get("floor") or {}
+    history = data.get("history") or []
 
     client = _get_client()
     commands = extract_edit_commands(
-        prompt, summarize_floor(floor), client=client, model=MODEL
+        prompt, summarize_floor(floor), client=client, model=EDIT_MODEL, history=history
     )
     return apply_edits(floor, commands)

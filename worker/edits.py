@@ -17,10 +17,12 @@ Input is the current active floor, exactly as the frontend serialises it (cm):
       rooms:    [{id,wallIds,name,type,areaCm2}],   # DERIVED, sent by the client
     }
 
-v1 handles LOCAL edits only (furniture, openings, room name/type). Structural
-requests (resize/add/remove room) are reported in `warnings`; they re-flow the
-wall partition and land in v2 behind the same patch envelope (a `replaceFloor`
-op is reserved on the frontend for them).
+v1 handles LOCAL edits (furniture, openings, room name/type) that never touch
+the wall graph. STRUCTURAL edits (resize/add/remove/swap a room) re-flow the
+partition and live in restructure.py (v2); they come back as one `replaceFloor`
+op. apply_edits routes a turn to one path or the other — a full re-flow can't
+compose with id-level local ops in the same patch, so structural edits are
+exclusive per turn (any local ops in the same turn are skipped with a note).
 """
 
 from __future__ import annotations
@@ -29,6 +31,12 @@ import copy
 
 from catalog import lookup
 from llm import ROOM_TYPES
+from restructure import (
+    STRUCTURAL_OPS,
+    apply_structural_command,
+    build_program,
+    restructure,
+)
 from solver import (
     FurnitureSpec,
     Room,
@@ -42,8 +50,10 @@ from solver import (
 
 WALL_THICKNESS = 10  # cm; mirrors layout.WALL_THICKNESS (room rect edges are centerlines)
 
-# Op names that mean "change the wall partition" — not supported in v1.
-_STRUCTURAL_OPS = {"resize_room", "add_room", "remove_room", "swap_rooms", "move_room"}
+# Structural intents the model may still emit that v2 doesn't implement: "move"
+# is ambiguous for a space-filling partition (steer to swap), and "unsupported"
+# is the model's own escape hatch. Both warn rather than re-flow.
+_DEFERRED_STRUCTURAL = {"move_room", "unsupported"}
 
 
 # --------------------------------------------------------------------------- #
@@ -416,29 +426,79 @@ _HANDLERS = {
 # Top-level                                                                   #
 # --------------------------------------------------------------------------- #
 
+def _summary_text(summary: list[str], warnings: list[str]) -> str:
+    if summary:
+        text = "; ".join(summary)
+        return text[0].upper() + text[1:] + "."
+    if warnings:
+        return "I couldn't apply that edit."
+    return "No changes."
+
+
+def _apply_structural_edits(floor: dict, cmds: list[dict]) -> dict:
+    """Re-flow the partition for a structural turn → one `replaceFloor` op.
+
+    Structural edits are exclusive: a full re-flow replaces the whole floor, so
+    it can't compose with id-level local ops (their roomIds wouldn't exist after
+    the replace). All structural commands fold into one program edit + one
+    re-flow; any local ops in the same turn are skipped with a note.
+    """
+    program = build_program(floor)
+    summary: list[str] = []
+    warnings: list[str] = []
+    changed = 0
+
+    for cmd in cmds:
+        op = str(cmd.get("op", "")).strip()
+        if op in STRUCTURAL_OPS:
+            if apply_structural_command(program, cmd, summary, warnings):
+                changed += 1
+        elif op in _DEFERRED_STRUCTURAL:
+            warnings.append(
+                "Moving rooms isn't supported yet — try swapping two rooms, or "
+                "resizing / adding / removing one."
+            )
+        else:
+            warnings.append(f"Skipped '{op}' — structural edits are applied on their own.")
+
+    patch: list[dict] = []
+    if changed:
+        op = restructure(floor, program)
+        if op is not None:
+            patch.append(op)
+        else:
+            warnings.append("Couldn't re-flow the plan for that change.")
+
+    return {"patch": patch, "summary": _summary_text(summary, warnings), "warnings": warnings}
+
+
 def apply_edits(floor: dict, commands: list[dict]) -> dict:
     """Resolve loose edit commands into a concrete, id-level patch.
 
     Returns {patch, summary, warnings}. The frontend applies `patch` op-by-op
-    through planEdits and commits once (one undo step).
+    through planEdits and commits once (one undo step). A turn with any
+    structural command takes the re-flow path (restructure.py); otherwise it's
+    the local-edit path below.
     """
+    floor = copy.deepcopy(floor)
+    cmds = [c for c in (commands or []) if isinstance(c, dict)]
+
+    if any(str(c.get("op", "")).strip() in STRUCTURAL_OPS for c in cmds):
+        return _apply_structural_edits(floor, cmds)
+
     patch: list[dict] = []
     warnings: list[str] = []
     summary: list[str] = []
 
-    # Work on a copy: handlers mutate the floor as they go (so commands compose —
+    # Local path: handlers mutate the floor as they go (so commands compose —
     # e.g. "clear the room and add a sofa" doesn't treat the cleared furniture as
     # an obstacle for the new one), but the caller's input stays untouched.
-    floor = copy.deepcopy(floor)
-
-    for cmd in commands or []:
-        if not isinstance(cmd, dict):
-            continue
+    for cmd in cmds:
         op = str(cmd.get("op", "")).strip()
-        if op in _STRUCTURAL_OPS or op == "unsupported":
+        if op in _DEFERRED_STRUCTURAL:
             warnings.append(
-                "Resizing, adding or removing rooms isn't supported yet — "
-                "that's coming in a later update."
+                "Moving rooms isn't supported yet — try swapping two rooms, or "
+                "resizing / adding / removing one."
             )
             continue
         handler = _HANDLERS.get(op)
@@ -447,12 +507,6 @@ def apply_edits(floor: dict, commands: list[dict]) -> dict:
             continue
         handler(floor, cmd, patch, warnings, summary)
 
-    if summary:
-        text = "; ".join(summary)
-        summary_text = text[0].upper() + text[1:] + "."
-    elif warnings:
-        summary_text = "I couldn't apply that edit."
-    else:
-        summary_text = "No changes."
+    summary_text = _summary_text(summary, warnings)
 
     return {"patch": patch, "summary": summary_text, "warnings": warnings}
