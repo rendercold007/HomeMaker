@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { CanvasStage } from './components/Canvas/CanvasStage';
 import { FurniturePalette } from './components/Panels/FurniturePalette';
+import { AssistantPanel } from './components/Panels/AssistantPanel';
 import { InfoPanel } from './components/Panels/InfoPanel';
 import { PlansPanel } from './components/Panels/PlansPanel';
 import { usePlan } from './state/store';
@@ -22,10 +23,11 @@ function Viewer3DFallback() {
   );
 }
 
-type LeftTab = 'furniture' | 'plans';
+type LeftTab = 'furniture' | 'assistant' | 'plans';
 
 const TABS: { id: LeftTab; label: string; icon: string }[] = [
   { id: 'furniture', label: 'Palette',   icon: '⬡' },
+  { id: 'assistant', label: 'Assistant', icon: '✨' },
   { id: 'plans',     label: 'Plans',     icon: '▤' },
 ];
 
@@ -55,6 +57,7 @@ function LeftSidebar() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'furniture' && <FurniturePalette />}
+        {tab === 'assistant' && <AssistantPanel />}
         {tab === 'plans'     && <PlansPanel />}
       </div>
     </div>

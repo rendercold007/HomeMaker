@@ -1,0 +1,10 @@
+# Phase 4 · Step 2 (spatial solver): standard library only — no runtime deps,
+# and the tests run with zero installs (python3 -m unittest).
+#
+# Phase 4 · Step 3 (FastAPI worker + LLM via OpenRouter) adds:
+fastapi
+uvicorn[standard]
+openai            # OpenRouter is OpenAI-compatible; client points at openrouter.ai
+
+# Step 4 (vector DB) will add a client such as:
+# pinecone-client   # or psycopg[binary] + pgvector

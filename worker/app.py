@@ -1,0 +1,82 @@
+"""
+FastAPI worker (Phase 4 · Step 3) — the AI generation service.
+
+POST /auto-furnish takes an AutoFurnishRequest (the same wire shape the frontend
+sends) and returns generated furniture, running the full pipeline:
+LLM intent (OpenRouter) -> catalog dims -> spatial solver -> wire response.
+
+Run it:
+    cd worker
+    pip install -r requirements.txt
+    export OPENROUTER_API_KEY=sk-or-...        # your OpenRouter key
+    export LLM_MODEL=openai/gpt-4o-mini        # optional; any OpenRouter slug
+    uvicorn app:app --reload --port 8000
+
+The Node gateway (vite.config.ts dev middleware / api/design/auto-furnish.ts)
+forwards /api/design/auto-furnish here when WORKER_URL points at it; otherwise it
+falls back to the step-1 mock, so the app keeps working with the worker offline.
+"""
+
+from __future__ import annotations
+
+import os
+
+from fastapi import FastAPI, Request
+
+from contract import parse_request
+from layout import RoomRequest, generate_plan
+from llm import DEFAULT_MODEL, extract_room_program, extract_shopping_list, make_client
+from pipeline import auto_furnish
+
+app = FastAPI(title="HomeMaker AI worker")
+
+MODEL = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = make_client()  # raises clearly if OPENROUTER_API_KEY is unset
+    return _client
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "model": MODEL}
+
+
+@app.post("/auto-furnish")
+async def auto_furnish_route(request: Request) -> dict:
+    """Furnish an existing room (furniture only)."""
+    data = await request.json()
+    req = parse_request(data)
+    client = _get_client()
+
+    def llm_fn(prompt, room):
+        return extract_shopping_list(prompt, room, client=client, model=MODEL)
+
+    return auto_furnish(req, llm_fn)
+
+
+@app.post("/generate-plan")
+async def generate_plan_route(request: Request) -> dict:
+    """Generate a whole multi-room floor plan (walls + doors + windows + furniture).
+
+    v1 only uses the plot's width/depth — it lays the rooms out in a single
+    axis-aligned rectangle and ignores Plot.shape and the entrance side (see
+    layout.generate_plan). That's intentional scope, not a missing feature.
+    """
+    data = await request.json()
+    prompt = str(data.get("prompt", ""))
+    plot = data.get("plot") or {}
+    width = int(plot.get("widthCm", 914))
+    depth = int(plot.get("depthCm", 1219))
+
+    client = _get_client()
+    program = extract_room_program(prompt, client=client, model=MODEL)
+    rooms = [RoomRequest(it.name, it.type, it.weight) for it in program] or [
+        RoomRequest("Room", "living", 1)
+    ]
+    return generate_plan((0, 0, width, depth), rooms)
