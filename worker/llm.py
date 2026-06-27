@@ -164,26 +164,75 @@ class RoomProgramItem:
     weight: float = 1.0
 
 
+# Compass sides the layout understands for the entrance (N=top, S=bottom,
+# W=left, E=right in the app's screen-y-down world). None = "no preference".
+ENTRANCE_SIDES = ("N", "S", "E", "W")
+
+# Plot envelopes the layout understands. "irregular" is approximated by an L for
+# now; "square" is just a rectangle. None = "no preference" (→ rectangular).
+PLOT_SHAPES = ("rectangular", "lshape")
+
+
+@dataclass(frozen=True)
+class RoomProgram:
+    rooms: list[RoomProgramItem]
+    entrance: str | None = None  # one of ENTRANCE_SIDES, or None if unspecified
+    shape: str | None = None  # one of PLOT_SHAPES, or None if unspecified
+
+
 def build_room_program_prompt() -> str:
     return (
         "You are an architect. Given a request, list the rooms a home should have. "
         "Decide which rooms and their RELATIVE sizes only — no coordinates, no walls.\n\n"
         "Respond with JSON ONLY:\n"
-        '{"rooms": [{"name": "<label>", "type": "<type>", "weight": <number>}]}\n\n'
+        '{"rooms": [{"name": "<label>", "type": "<type>", "weight": <number>}], '
+        '"entrance": "<N|S|E|W or null>", "shape": "<rectangular|lshape or null>"}\n\n'
         f"Each \"type\" MUST be one of: {', '.join(ROOM_TYPES)}.\n"
         '"weight" is relative floor area (e.g. living ~3, bedroom ~2, kitchen ~1.5, bathroom ~1).\n'
+        '"entrance" is the compass side the main door faces IF the request names one '
+        '(e.g. "entrance on the south" → "S", "north-facing" → "N", "front door to the '
+        'east" → "E"); otherwise null. Use only a single letter N, S, E, or W.\n'
+        '"shape" is the plot/footprint outline IF the request names one '
+        '(e.g. "L-shaped house" → "lshape", "rectangular plot" → "rectangular"); '
+        "otherwise null.\n"
         "Include every room the request implies — e.g. a \"2BHK\" has a living room, a "
         "kitchen, 2 bedrooms, and 1-2 bathrooms. Output nothing but the JSON object."
     )
 
 
-def parse_room_program(content: str) -> list[RoomProgramItem]:
+def normalize_entrance(value) -> str | None:
+    """Normalise an entrance hint to N/S/E/W, or None. Accepts 'south', 'N', etc."""
+    if not value:
+        return None
+    s = str(value).strip().upper()
+    if s in ENTRANCE_SIDES:
+        return s
+    words = {"NORTH": "N", "SOUTH": "S", "EAST": "E", "WEST": "W"}
+    return words.get(s)
+
+
+def normalize_shape(value) -> str | None:
+    """Normalise a plot-shape hint to 'lshape'/'rectangular', or None.
+
+    'l', 'l-shape', 'l shaped', 'irregular' → lshape; 'rectangular', 'rectangle',
+    'square' → rectangular; anything else → None."""
+    if not value:
+        return None
+    s = str(value).strip().lower().replace("-", " ").replace("_", " ")
+    if s in ("l", "l shape", "l shaped", "lshape", "lshaped", "irregular"):
+        return "lshape"
+    if s in ("rectangular", "rectangle", "rect", "square"):
+        return "rectangular"
+    return None
+
+
+def parse_room_program(content: str) -> RoomProgram:
     data = _extract_json(content)
-    rooms = data.get("rooms") if isinstance(data, dict) else data
-    if not isinstance(rooms, list):
-        return []
+    rooms_raw = data.get("rooms") if isinstance(data, dict) else data
+    if not isinstance(rooms_raw, list):
+        rooms_raw = []
     out: list[RoomProgramItem] = []
-    for it in rooms:
+    for it in rooms_raw:
         if not isinstance(it, dict):
             continue
         t = str(it.get("type", "other")).strip().lower()
@@ -197,10 +246,13 @@ def parse_room_program(content: str) -> list[RoomProgramItem]:
             w = 1.0
         name = str(it.get("name") or t.title())
         out.append(RoomProgramItem(name=name, type=t, weight=w))
-    return out
+    d = data if isinstance(data, dict) else {}
+    entrance = normalize_entrance(d.get("entrance"))
+    shape = normalize_shape(d.get("shape"))
+    return RoomProgram(rooms=out, entrance=entrance, shape=shape)
 
 
-def extract_room_program(prompt: str, *, client, model: str) -> list[RoomProgramItem]:
+def extract_room_program(prompt: str, *, client, model: str) -> RoomProgram:
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -236,6 +288,8 @@ ALLOWED_EDIT_OPS = (
     "add_room",         # {name, type}
     "remove_room",      # {room}
     "swap_rooms",       # {room, with}
+    # Conversation
+    "clarify",          # {question}  — ask the user instead of guessing
 )
 
 
@@ -274,8 +328,14 @@ def build_edit_prompt(floor_summary: str, types: list[str] | None = None) -> str
         "Produce commands ONLY for the latest request. Any earlier messages are "
         'context for resolving references like "it" or "the other room" — do NOT '
         "re-issue edits that were already applied in previous turns.\n"
-        'If you truly can\'t express the request with the ops above, return '
-        'exactly {"commands": [{"op": "unsupported"}]} — never an empty list.\n'
+        "If the request is too vague to act on — you genuinely can't tell WHAT to "
+        "change or WHICH room is meant, and the floor and earlier turns don't make "
+        'it clear — return {"commands": [{"op": "clarify", "question": "<one short '
+        'question>"}]} instead of guessing. Prefer acting whenever the intent is '
+        "clear. If an earlier assistant turn asked the user to clarify, combine "
+        "their answer with that earlier request to produce the intended command now.\n"
+        'If a request just isn\'t expressible with the ops above, return exactly '
+        '{"commands": [{"op": "unsupported"}]} — never an empty list.\n'
         "Output nothing but the JSON object."
     )
 

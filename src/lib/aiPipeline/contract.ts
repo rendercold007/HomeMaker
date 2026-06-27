@@ -106,16 +106,24 @@ export interface SerializedFloor {
   rooms: EditRoom[];
 }
 
-/** Request: a natural-language edit + the current floor it applies to. */
+/** One past edit turn, replayed to the worker for conversational reference
+ * resolution ("make it bigger", "the other bedroom"). `summary` is the recap
+ * the worker returned for that turn. */
+export interface EditTurn { prompt: string; summary: string }
+
+/** Request: a natural-language edit + the current floor it applies to, plus the
+ * recent conversation so references to earlier turns resolve. */
 export interface EditPlanRequest {
   prompt: string;
   floor: SerializedFloor;
+  history?: EditTurn[];
 }
 
 /**
  * One concrete, id-level edit operation. Each maps 1:1 to a planEdits call in
- * applyEditPatch. `replaceFloor` is reserved for v2 structural edits (room
- * resize/add/remove); no v1 command emits it yet.
+ * applyEditPatch. `replaceFloor` carries a full re-flow of one floor for v2
+ * structural edits (room resize/add/remove/swap); it routes through the
+ * applyGeneratedPlan path. See docs/IterativeEditing.md.
  */
 export type EditPatchOp =
   | { op: 'addFurniture'; items: { type: string; x: number; y: number; rotationDeg: number; roomId: string }[] }

@@ -31,6 +31,16 @@ GRID = 10  # snap splits to 10 cm
 WALL_THICKNESS = 10
 WALL_HEIGHT = 270
 
+# Entrance sides, in the app's screen-y-down world: N=top, S=bottom, W=left, E=right.
+ENTRANCE_SIDES = ("N", "S", "E", "W")
+
+CORRIDOR_WIDTH = 120  # cm — a comfortable single corridor that fits a 100 cm door
+MIN_ROOMS_FOR_CORRIDOR = 4  # below this, rooms connect directly (a hall isn't worth the area)
+HALLWAY_TYPE = "hallway"
+
+NOTCH_FRAC = 0.4  # an L-shape removes this fraction of width AND height in one corner
+PLOT_SHAPES = ("rectangular", "lshape")  # "irregular" is approximated by "lshape"
+
 Rect = tuple[int, int, int, int]  # x0, y0, x1, y1 (cm)
 
 
@@ -82,6 +92,98 @@ def bsp_layout(x0: int, y0: int, x1: int, y1: int, rooms: list[RoomRequest]) -> 
         return bsp_layout(x0, y0, xm, y1, left) + bsp_layout(xm, y0, x1, y1, right)
     ym = max(y0 + GRID, min(_snap(y0 + h * frac), y1 - GRID))
     return bsp_layout(x0, y0, x1, ym, left) + bsp_layout(x0, ym, x1, y1, right)
+
+
+def _split_index(rooms: list[RoomRequest]) -> int:
+    """Weight-median split point (same rule as bsp_layout's first cut)."""
+    total = sum(max(r.weight, 0.01) for r in rooms)
+    half, acc, idx = total / 2, 0.0, 1
+    for k, r in enumerate(rooms):
+        acc += max(r.weight, 0.01)
+        if acc >= half:
+            idx = k + 1
+            break
+    return max(1, min(idx, len(rooms) - 1))
+
+
+def layout_with_corridor(
+    x0: int, y0: int, x1: int, y1: int, rooms: list[RoomRequest], entrance: str | None
+) -> list[PlacedRoom]:
+    """Carve a straight spine corridor through the plot and BSP the rooms onto
+    either side of it, so rooms open onto a hallway instead of onto each other.
+
+    The corridor runs perpendicular to the entrance wall (so it reaches the front
+    door): a N/S entrance gives a vertical full-height spine, an E/W entrance a
+    horizontal full-width one. With no entrance it follows the longer axis. Rooms
+    are weight-split into the two sides and each side is laid out by `bsp_layout`,
+    so the whole plot still tiles exactly (the wall graph stays planar and valid).
+    """
+    w, h = x1 - x0, y1 - y0
+    vertical = entrance in ("N", "S") if entrance in ENTRANCE_SIDES else h >= w
+    idx = _split_index(rooms)
+    side_a, side_b = rooms[:idx], rooms[idx:]
+    total = sum(max(r.weight, 0.01) for r in rooms)
+    frac_a = sum(max(r.weight, 0.01) for r in side_a) / total
+
+    if vertical:
+        cw = max(GRID, min(CORRIDOR_WIDTH, w - 2 * GRID))
+        cx0 = max(x0 + GRID, min(_snap(x0 + (w - cw) * frac_a), x1 - cw - GRID))
+        cx1 = cx0 + cw
+        left = bsp_layout(x0, y0, cx0, y1, side_a)
+        right = bsp_layout(cx1, y0, x1, y1, side_b)
+        hall = PlacedRoom("Hallway", HALLWAY_TYPE, (cx0, y0, cx1, y1))
+        return left + [hall] + right
+
+    cw = max(GRID, min(CORRIDOR_WIDTH, h - 2 * GRID))
+    cy0 = max(y0 + GRID, min(_snap(y0 + (h - cw) * frac_a), y1 - cw - GRID))
+    cy1 = cy0 + cw
+    top = bsp_layout(x0, y0, x1, cy0, side_a)
+    bottom = bsp_layout(x0, cy1, x1, y1, side_b)
+    hall = PlacedRoom("Hallway", HALLWAY_TYPE, (x0, cy0, x1, cy1))
+    return top + [hall] + bottom
+
+
+def notch_corner(entrance: str | None) -> str:
+    """Which corner of the bounding box the L-shape's notch is cut from.
+
+    We keep the notch away from the entrance so the front of the house stays a
+    full wing. Deterministic; defaults to SE when no entrance is given."""
+    return {"N": "SE", "S": "NE", "E": "SW", "W": "SE"}.get(entrance, "SE")
+
+
+def lshape_layout(
+    x0: int, y0: int, x1: int, y1: int, rooms: list[RoomRequest], corner: str
+) -> list[PlacedRoom]:
+    """Lay the rooms into an L-shaped footprint: the bounding box minus a corner
+    notch. The L splits cleanly into two rectangles (a full-length wing + a
+    shorter block beside the notch); rooms are divided between them by area and
+    each wing is laid out by `bsp_layout`. The two wings exactly tile the L, so
+    the (shape-agnostic) wall graph comes out planar with the notch as exterior.
+    """
+    w, h = x1 - x0, y1 - y0
+    nw = max(GRID, min(_snap(w * NOTCH_FRAC), w - GRID))
+    nh = max(GRID, min(_snap(h * NOTCH_FRAC), h - GRID))
+
+    # Two rectangles that tile the L. `wing` is the full-length side; `block` is
+    # the shorter piece next to the notch.
+    if corner == "SE":  # notch bottom-right
+        wing = (x0, y0, x1 - nw, y1)
+        block = (x1 - nw, y0, x1, y1 - nh)
+    elif corner == "NE":  # notch top-right
+        wing = (x0, y0, x1 - nw, y1)
+        block = (x1 - nw, y0 + nh, x1, y1)
+    elif corner == "SW":  # notch bottom-left
+        wing = (x0 + nw, y0, x1, y1)
+        block = (x0, y0, x0 + nw, y1 - nh)
+    else:  # "NW" — notch top-left
+        wing = (x0 + nw, y0, x1, y1)
+        block = (x0, y0 + nh, x0 + nw, y1)
+
+    a_wing = (wing[2] - wing[0]) * (wing[3] - wing[1])
+    a_block = (block[2] - block[0]) * (block[3] - block[1])
+    n = len(rooms)
+    k = max(1, min(n - 1, round(n * a_wing / (a_wing + a_block))))
+    return bsp_layout(*wing, rooms[:k]) + bsp_layout(*block, rooms[k:])
 
 
 # --------------------------------------------------------------------------- #
@@ -212,7 +314,32 @@ def _add_opening(openings: list, wall: dict, pts: dict, kind: str, desired: int)
     return True
 
 
-def place_openings(placed: list[PlacedRoom], points: list[dict], walls: list[dict], rects: list[Rect]) -> list[dict]:
+def _wall_compass_side(wall: dict, pts: dict, bounds: Rect) -> str | None:
+    """Which footprint edge an exterior wall lies on: N(top)/S(bottom)/W/E, or
+    None if it isn't on the bounding edge (e.g. an interior notch of an L-shape).
+    Screen-y-down world: North = smaller y."""
+    px0, py0, px1, py1 = bounds
+    a, b = pts[wall["a"]], pts[wall["b"]]
+    if a["y"] == b["y"]:  # horizontal
+        if a["y"] == py0:
+            return "N"
+        if a["y"] == py1:
+            return "S"
+    elif a["x"] == b["x"]:  # vertical
+        if a["x"] == px0:
+            return "W"
+        if a["x"] == px1:
+            return "E"
+    return None
+
+
+def place_openings(
+    placed: list[PlacedRoom],
+    points: list[dict],
+    walls: list[dict],
+    rects: list[Rect],
+    entrance_side: str | None = None,
+) -> list[dict]:
     pts = {p["id"]: p for p in points}
     n = len(placed)
 
@@ -229,7 +356,11 @@ def place_openings(placed: list[PlacedRoom], points: list[dict], walls: list[dic
 
     openings: list[dict] = []
 
-    # Interior doors: a spanning tree so every room is reachable.
+    corridor = next((i for i, p in enumerate(placed) if p.type == HALLWAY_TYPE), None)
+
+    # Interior doors: a spanning tree so every room is reachable. When a corridor
+    # exists, prefer its edges first so it becomes the hub — rooms hang off the
+    # hall rather than chaining through each other.
     parent = list(range(n))
 
     def find(x: int) -> int:
@@ -238,23 +369,61 @@ def place_openings(placed: list[PlacedRoom], points: list[dict], walls: list[dic
             x = parent[x]
         return x
 
-    for pair, wlist in sorted(
-        interior.items(),
-        key=lambda kv: -max(_wall_len(pts[w["a"]], pts[w["b"]]) for w in kv[1]),
-    ):
+    def _edge_key(kv):
+        pair, wlist = kv
+        longest = max(_wall_len(pts[w["a"]], pts[w["b"]]) for w in wlist)
+        on_corridor = corridor is not None and corridor in pair
+        return (0 if on_corridor else 1, -longest)
+
+    for pair, wlist in sorted(interior.items(), key=_edge_key):
         a, b = tuple(pair)
         if find(a) != find(b):
             wall = max(wlist, key=lambda w: _wall_len(pts[w["a"]], pts[w["b"]]))
             if _add_opening(openings, wall, pts, "door", 90):
                 parent[find(a)] = find(b)
 
-    # Entrance door on a public room's longest exterior wall.
-    for i in sorted(range(n), key=lambda i: 0 if placed[i].type in ("living", "dining") else 1):
-        ext = exterior.get(i, [])
-        if ext:
-            wall = max(ext, key=lambda w: _wall_len(pts[w["a"]], pts[w["b"]]))
-            _add_opening(openings, wall, pts, "door", 100)
-            break
+    # Entrance door. With a corridor, you enter into the hall, so the front door
+    # goes on a corridor exterior wall (preferring the requested side). Without a
+    # corridor, put it on an exterior wall of the requested side — preferring a
+    # public room (living/dining) and the longest wall — else the v1 fallback.
+    def _is_public(i: int) -> bool:
+        return placed[i].type in ("living", "dining")
+
+    bounds = (
+        min(r[0] for r in rects), min(r[1] for r in rects),
+        max(r[2] for r in rects), max(r[3] for r in rects),
+    )
+    entrance_done = False
+
+    if corridor is not None:
+        cwalls = exterior.get(corridor, [])
+        on_side = [w for w in cwalls if _wall_compass_side(w, pts, bounds) == entrance_side]
+        cand = on_side or cwalls
+        if cand:
+            wall = max(cand, key=lambda w: _wall_len(pts[w["a"]], pts[w["b"]]))
+            entrance_done = _add_opening(openings, wall, pts, "door", 100)
+
+    if not entrance_done and entrance_side:
+        on_side = [
+            (i, w)
+            for i in range(n)
+            for w in exterior.get(i, [])
+            if _wall_compass_side(w, pts, bounds) == entrance_side
+        ]
+        if on_side:
+            i, wall = max(
+                on_side,
+                key=lambda iw: (_is_public(iw[0]), _wall_len(pts[iw[1]["a"]], pts[iw[1]["b"]])),
+            )
+            entrance_done = _add_opening(openings, wall, pts, "door", 100)
+
+    if not entrance_done:
+        for i in sorted(range(n), key=lambda i: 0 if _is_public(i) else 1):
+            ext = exterior.get(i, [])
+            if ext:
+                wall = max(ext, key=lambda w: _wall_len(pts[w["a"]], pts[w["b"]]))
+                _add_opening(openings, wall, pts, "door", 100)
+                break
 
     # Windows on exterior walls of light-wanting rooms (one per room, avoid door walls).
     want_window = {"living", "bedroom", "kitchen", "dining", "study"}
@@ -325,13 +494,48 @@ def furnish(placed: list[PlacedRoom]) -> list[dict]:
 # Top-level                                                                   #
 # --------------------------------------------------------------------------- #
 
-def generate_plan(plot: Rect, rooms: list[RoomRequest]) -> dict:
-    # v1 scope: lays the program out in a single axis-aligned rectangle (the plot
-    # bounds). Plot.shape (lshape/irregular) and the entrance side are intentionally
-    # ignored here — not a bug; richer envelopes are future work.
-    placed = bsp_layout(*plot, rooms)
+def _bias_for_entrance(rooms: list[RoomRequest], entrance: str | None) -> list[RoomRequest]:
+    """Best-effort: nudge public rooms (living/dining) toward the entrance side.
+
+    BSP's first cut sends the head of the list to the West (x-split) / North
+    (y-split) block and the tail to the East / South block. So we float public
+    rooms to the front for N/W entrances and to the back for E/S entrances. It's
+    a tendency, not a guarantee (deeper cuts decide the perpendicular axis), but
+    it costs nothing and never breaks the tiling. Order is otherwise preserved.
+    """
+    if entrance not in ENTRANCE_SIDES:
+        return rooms
+    public = [r for r in rooms if r.type in ("living", "dining")]
+    rest = [r for r in rooms if r.type not in ("living", "dining")]
+    if not public or not rest:
+        return rooms
+    return public + rest if entrance in ("N", "W") else rest + public
+
+
+def generate_plan(
+    plot: Rect,
+    rooms: list[RoomRequest],
+    entrance: str | None = None,
+    shape: str | None = None,
+) -> dict:
+    # Lays the program out inside the plot bounds. `entrance` (N/S/E/W, from the
+    # prompt) places the front door on that side and biases public rooms toward
+    # it. `shape` ("lshape") carves a corner notch so the footprint is an L;
+    # otherwise, with enough rooms, a spine corridor is carved so rooms open onto
+    # a hallway. The wall graph is shape-agnostic, so an L tiles + extrudes fine.
+    entrance = entrance if entrance in ENTRANCE_SIDES else None
+    shape = shape if shape in PLOT_SHAPES else None
+    ordered = _bias_for_entrance(rooms, entrance)
+    if shape == "lshape" and len(ordered) >= 2:
+        # L-shape and the spine corridor don't compose yet — the L's wings already
+        # break the footprint up, so v1 uses the notch alone.
+        placed = lshape_layout(*plot, ordered, notch_corner(entrance))
+    elif len(ordered) >= MIN_ROOMS_FOR_CORRIDOR:
+        placed = layout_with_corridor(*plot, ordered, entrance)
+    else:
+        placed = bsp_layout(*plot, ordered)
     points, walls, rects = build_graph(placed)
-    openings = place_openings(placed, points, walls, rects)
+    openings = place_openings(placed, points, walls, rects, entrance_side=entrance)
     furniture = furnish(placed)
     return {
         "plan": {

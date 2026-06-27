@@ -34,6 +34,8 @@ from llm import (
     extract_room_program,
     extract_shopping_list,
     make_client,
+    normalize_entrance,
+    normalize_shape,
 )
 from pipeline import auto_furnish
 
@@ -77,9 +79,12 @@ async def auto_furnish_route(request: Request) -> dict:
 async def generate_plan_route(request: Request) -> dict:
     """Generate a whole multi-room floor plan (walls + doors + windows + furniture).
 
-    v1 only uses the plot's width/depth — it lays the rooms out in a single
-    axis-aligned rectangle and ignores Plot.shape and the entrance side (see
-    layout.generate_plan). That's intentional scope, not a missing feature.
+    Lays the rooms out inside the plot's width/depth. The entrance side and the
+    footprint shape come from the prompt as pure intent (the LLM extracts N/S/E/W
+    and rectangular/lshape), each falling back to an explicit plot.entrance /
+    plot.shape if the frontend sends one. The front door is placed on the entrance
+    side with public rooms biased toward it; an "lshape" carves a corner notch,
+    otherwise a spine corridor is added when there are enough rooms.
     """
     data = await request.json()
     prompt = str(data.get("prompt", ""))
@@ -89,10 +94,13 @@ async def generate_plan_route(request: Request) -> dict:
 
     client = _get_client()
     program = extract_room_program(prompt, client=client, model=MODEL)
-    rooms = [RoomRequest(it.name, it.type, it.weight) for it in program] or [
+    rooms = [RoomRequest(it.name, it.type, it.weight) for it in program.rooms] or [
         RoomRequest("Room", "living", 1)
     ]
-    return generate_plan((0, 0, width, depth), rooms)
+    # Prompt intent wins; fall back to an explicit plot.entrance / plot.shape.
+    entrance = program.entrance or normalize_entrance(plot.get("entrance"))
+    shape = program.shape or normalize_shape(plot.get("shape"))
+    return generate_plan((0, 0, width, depth), rooms, entrance=entrance, shape=shape)
 
 
 @app.post("/edit-plan")

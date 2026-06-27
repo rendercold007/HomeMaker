@@ -128,13 +128,18 @@ class TestApplyEdits(unittest.TestCase):
             {"op": "setRoomType", "roomId": "roomB", "type": "study"},
         ])
 
-    def test_structural_resize_reflows_into_replace_floor(self):
-        # v2: a resize re-flows the partition and comes back as one replaceFloor
-        # op (a whole new floor), not a warning.
+    def test_structural_resize_comes_back_as_replace_floor(self):
+        # A resize comes back as one replaceFloor op (a whole new floor), not a
+        # warning. v3 (surgical) handles this clean tiling: the footprint is fixed
+        # and the existing window is preserved rather than regenerated.
         res = apply_edits(_floor(), [{"op": "resize_room", "room": "Living", "change": "bigger"}])
         self.assertEqual([op["op"] for op in res["patch"]], ["replaceFloor"])
         floor = res["patch"][0]
         self.assertEqual({r["name"] for r in floor["rooms"]}, {"Living", "Bedroom"})
+        xs = [p["x"] for p in floor["points"]]
+        ys = [p["y"] for p in floor["points"]]
+        self.assertEqual((min(xs), min(ys), max(xs), max(ys)), (0, 0, 400, 300))
+        self.assertIn("window", [o["kind"] for o in floor["openings"]])
         self.assertTrue(res["summary"].lower().startswith("enlarged"))
         self.assertFalse(res["warnings"])
 
@@ -186,6 +191,44 @@ class TestApplyEdits(unittest.TestCase):
         self.assertIn("Living", text)
         self.assertIn("Bedroom", text)
         self.assertIn("coffee_table", text)
+
+
+class TestClarifyBack(unittest.TestCase):
+    def _two_bedroom_floor(self):
+        floor = _floor()
+        # Re-label both rooms as bedrooms so "the bedroom" is ambiguous.
+        floor["rooms"][0].update(name="Bedroom 1", type="bedroom")
+        floor["rooms"][1].update(name="Bedroom 2", type="bedroom")
+        return floor
+
+    def test_ambiguous_room_asks_instead_of_acting(self):
+        res = apply_edits(self._two_bedroom_floor(), [
+            {"op": "resize_room", "room": "bedroom", "change": "bigger"},
+        ])
+        self.assertEqual(res["patch"], [])  # nothing applied
+        self.assertIn("Bedroom 1", res["summary"])
+        self.assertIn("Bedroom 2", res["summary"])
+        self.assertTrue(res["summary"].rstrip().endswith("?"))
+
+    def test_specific_room_is_not_ambiguous(self):
+        res = apply_edits(self._two_bedroom_floor(), [
+            {"op": "rename_room", "room": "Bedroom 2", "name": "Study"},
+        ])
+        self.assertEqual([op["op"] for op in res["patch"]], ["setRoomName"])
+
+    def test_model_clarify_op_passes_through(self):
+        res = apply_edits(_floor(), [
+            {"op": "clarify", "question": "What style are you going for?"},
+        ])
+        self.assertEqual(res["patch"], [])
+        self.assertEqual(res["summary"], "What style are you going for?")
+
+    def test_unique_handle_still_acts(self):
+        # Sanity: with one Living, "living" resolves uniquely — no clarify.
+        res = apply_edits(_floor(), [
+            {"op": "rename_room", "room": "living", "name": "Lounge"},
+        ])
+        self.assertEqual([op["op"] for op in res["patch"]], ["setRoomName"])
 
 
 if __name__ == "__main__":

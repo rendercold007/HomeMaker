@@ -1,159 +1,208 @@
 /**
- * AssistantPanel — Phase 4 entry point (chat → editable plan).
+ * AssistantPanel — the chat shell (Phase 4 · chat → editable plan).
  *
- * A prompt box with three actions: "Generate plan" (whole multi-room floor
- * plan), "Edit plan" (chat-driven edits to the existing plan — "add a window to
- * the kitchen", "rename bedroom 2 to a study"; see docs/IterativeEditing.md), and
- * "Auto-furnish" (furniture for the current room). Each POSTs to the worker and
- * commits its result to the store as ONE undo step, so 2D and 3D update from the
- * same Plan. With the worker offline, auto-furnish falls back to the step-1 mock;
- * generate and edit require the worker. See src/lib/aiPipeline/client.ts.
+ * One conversation, not a row of buttons. The first message GENERATES a whole
+ * floor plan; after that, every message EDITS the existing plan by chat ("make
+ * the living room bigger", "add a study", "remove the coffee table"). The panel
+ * auto-routes on whether the active floor has rooms yet, so the user never picks
+ * a mode — they just talk.
+ *
+ * Same boundary rule as the rest of the AI pipeline (CLAUDE.md → "The AI
+ * backend"): every worker result re-enters through the store as ONE commit, so
+ * 2D, 3D, and undo/redo update from the same Plan. Generate replaces the floor;
+ * edit folds a patch (local ops, or a structural `replaceFloor` re-flow) as a
+ * single undo step. Recent (prompt, summary) turns are replayed to the worker so
+ * follow-ups like "make it bigger" / "the other bedroom" resolve. The worker is
+ * required (generate + edit); see src/lib/aiPipeline/client.ts.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePlan, useActiveFloor } from '../../state/store';
-import { requestAutoFurnish, requestEditPlan, requestGeneratePlan } from '../../lib/aiPipeline/client';
-import { applyGeneratedFurniture } from '../../lib/aiPipeline/applyGenerated';
+import { requestEditPlan, requestGeneratePlan } from '../../lib/aiPipeline/client';
 import { applyGeneratedPlan } from '../../lib/aiPipeline/applyPlan';
 import { applyEditPatch } from '../../lib/aiPipeline/applyEditPatch';
-import type { AutoFurnishRequest, EditPlanRequest, GeneratePlanRequest } from '../../lib/aiPipeline/contract';
+import type { EditPlanRequest, EditTurn, GeneratePlanRequest } from '../../lib/aiPipeline/contract';
 import { serializeFloor } from '../../lib/aiPipeline/contract';
-import { DEFAULT_WALL_HEIGHT } from '../../model/planEdits';
 
-const CM_PER_M = 100;
+// How many recent turns to send back to the worker for "make it bigger"-style
+// reference resolution. The worker caps too; this just bounds the payload.
+const MAX_HISTORY = 8;
+
+/** A line in the conversation. `warnings` hang off the assistant's reply. */
+type ChatMsg =
+  | { role: 'user'; text: string }
+  | { role: 'assistant'; text: string; warnings?: string[]; tone?: 'normal' | 'error' };
 
 export function AssistantPanel() {
   const { plan, commit } = usePlan();
   const { activeFloorId } = useActiveFloor();
-  const [prompt, setPrompt] = useState('A 2BHK apartment');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ summary: string; warnings: string[] } | null>(null);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  // The edit conversation so far (prompt + the recap we got back), replayed to
+  // the worker so follow-ups resolve against prior turns. Reset on a fresh plan.
+  const [history, setHistory] = useState<EditTurn[]>([]);
 
   const activeFloor = plan.floors.find((f) => f.id === activeFloorId);
-  // Editing only makes sense once there's a plan to edit (derived rooms exist).
-  const canEdit = (activeFloor?.rooms.length ?? 0) > 0;
+  // First message generates; once rooms exist, every message edits.
+  const hasPlan = (activeFloor?.rooms.length ?? 0) > 0;
 
-  // Wrap an async action with shared loading/error state.
-  async function run(action: () => Promise<void>) {
-    setStatus('loading');
-    setError(null);
-    setResult(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, loading]);
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput('');
+    setMessages((m) => [...m, { role: 'user', text }]);
+    setLoading(true);
+    const editing = hasPlan && !!activeFloor; // snapshot before the commit flips it
+
     try {
-      await action();
-      setStatus('idle');
+      if (editing) {
+        const req: EditPlanRequest = {
+          prompt: text,
+          floor: serializeFloor(activeFloor!),
+          history: history.slice(-MAX_HISTORY),
+        };
+        const res = await requestEditPlan(req);
+        // Only commit when there's an actual change — a clarifying question or a
+        // "couldn't do that" reply has an empty patch and must not push an undo step.
+        if (res.patch.length > 0) {
+          commit((current) => applyEditPatch(current, activeFloorId, res));
+        }
+        setMessages((m) => [...m, { role: 'assistant', text: res.summary, warnings: res.warnings }]);
+        setHistory((h) => [...h, { prompt: text, summary: res.summary }]);
+      } else {
+        const req: GeneratePlanRequest = {
+          prompt: text,
+          plot: { widthCm: plan.plot.widthCm, depthCm: plan.plot.depthCm },
+        };
+        const res = await requestGeneratePlan(req);
+        commit((current) => applyGeneratedPlan(current, activeFloorId, res));
+        setHistory([]); // a fresh plan starts a fresh edit conversation
+        const n = res.plan.rooms.length;
+        setMessages((m) => [
+          ...m,
+          {
+            role: 'assistant',
+            text:
+              `Here's your floor plan — ${n} ${n === 1 ? 'room' : 'rooms'}. ` +
+              'Want to customize it? Tell me what to change — e.g. "make the living ' +
+              'room bigger", "add a study", or "remove the coffee table".',
+          },
+        ]);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong');
-      setStatus('error');
+      const msg = e instanceof Error ? e.message : 'Something went wrong';
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', tone: 'error', text: `Sorry — ${msg}` },
+      ]);
+    } finally {
+      setLoading(false);
     }
   }
 
-  // Generate a whole multi-room floor plan: walls + doors + windows + furniture.
-  function handleGeneratePlan() {
-    const req: GeneratePlanRequest = {
-      prompt,
-      plot: { widthCm: plan.plot.widthCm, depthCm: plan.plot.depthCm },
-    };
-    return run(async () => {
-      const res = await requestGeneratePlan(req);
-      // One commit → one undo step; re-enters through the store, not around it.
-      commit((current) => applyGeneratedPlan(current, activeFloorId, res));
-    });
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
   }
-
-  // Furnish the current room (furniture only — leaves the walls alone).
-  function handleFurnish() {
-    const req: AutoFurnishRequest = {
-      prompt,
-      room: {
-        dimensions: {
-          width: plan.plot.widthCm / CM_PER_M,
-          length: plan.plot.depthCm / CM_PER_M,
-          height: DEFAULT_WALL_HEIGHT / CM_PER_M,
-        },
-      },
-    };
-    return run(async () => {
-      const res = await requestAutoFurnish(req);
-      commit((current) => applyGeneratedFurniture(current, activeFloorId, res));
-    });
-  }
-
-  // Edit the existing plan by chat ("add a window to the kitchen", "rename
-  // bedroom 2 to a study"). Sends the current floor; commits the returned patch
-  // as one undo step.
-  function handleEdit() {
-    if (!activeFloor) return;
-    const req: EditPlanRequest = { prompt, floor: serializeFloor(activeFloor) };
-    return run(async () => {
-      const res = await requestEditPlan(req);
-      commit((current) => applyEditPatch(current, activeFloorId, res));
-      setResult({ summary: res.summary, warnings: res.warnings });
-    });
-  }
-
-  const loading = status === 'loading';
 
   return (
-    <aside className="flex h-full w-full flex-col gap-3 p-3 text-sm text-slate-200">
-      <div>
+    <aside className="flex h-full w-full flex-col text-sm text-slate-200">
+      <div className="border-b border-white/5 p-3">
         <h2 className="font-semibold text-slate-100">AI Assistant</h2>
         <p className="mt-0.5 text-[11px] leading-snug text-slate-400">
-          Describe a home or room — HomeMaker draws the walls and furnishes it.
-          <br />
-          <span className="text-slate-500">e.g. &ldquo;a 2BHK apartment&rdquo; or &ldquo;a cozy modern bedroom&rdquo;.</span>
+          {hasPlan
+            ? 'Tell me what to change — and I’ll edit the plan live.'
+            : 'Describe a home and I’ll draw the floor plan. Then we customize it together.'}
         </p>
       </div>
 
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={4}
-        placeholder="e.g. A 2BHK apartment with a big living room"
-        className="w-full resize-none rounded-md border border-white/10 bg-white/5 p-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none"
-      />
+      {/* Conversation */}
+      <div className="flex-1 space-y-2 overflow-y-auto p-3">
+        {messages.length === 0 && (
+          <div className="space-y-2 text-[11px] leading-snug text-slate-500">
+            <p>Try something like:</p>
+            <ul className="space-y-1">
+              {['A 2BHK apartment with a big living room', 'A studio with a kitchen and bathroom'].map((ex) => (
+                <li key={ex}>
+                  <button
+                    type="button"
+                    onClick={() => setInput(ex)}
+                    className="rounded border border-white/10 bg-white/5 px-2 py-1 text-left text-slate-300 transition hover:bg-white/10"
+                  >
+                    &ldquo;{ex}&rdquo;
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
-      <button
-        type="button"
-        onClick={handleGeneratePlan}
-        disabled={loading || prompt.trim().length === 0}
-        className="flex items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {loading ? 'Working…' : '🏠 Generate floor plan'}
-      </button>
-      <button
-        type="button"
-        onClick={handleEdit}
-        disabled={loading || !canEdit || prompt.trim().length === 0}
-        title={canEdit ? undefined : 'Generate a plan first, then edit it by chat.'}
-        className="flex items-center justify-center gap-2 rounded-md border border-indigo-400/40 bg-white/5 px-3 py-2 text-xs font-semibold text-indigo-200 transition hover:bg-white/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        ✏️ Edit plan
-      </button>
-      <button
-        type="button"
-        onClick={handleFurnish}
-        disabled={loading || prompt.trim().length === 0}
-        className="flex items-center justify-center gap-2 rounded-md border border-indigo-400/40 bg-white/5 px-3 py-2 text-xs font-semibold text-indigo-200 transition hover:bg-white/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        ✨ Furnish current room
-      </button>
+        {messages.map((m, i) =>
+          m.role === 'user' ? (
+            <div key={i} className="flex justify-end">
+              <p className="max-w-[85%] rounded-lg rounded-br-sm bg-indigo-600 px-2.5 py-1.5 text-xs text-white">
+                {m.text}
+              </p>
+            </div>
+          ) : (
+            <div key={i} className="flex flex-col gap-1">
+              <p
+                className={`max-w-[90%] rounded-lg rounded-bl-sm px-2.5 py-1.5 text-xs ${
+                  m.tone === 'error'
+                    ? 'bg-red-500/10 text-red-300'
+                    : 'bg-white/5 text-slate-200'
+                }`}
+              >
+                {m.text}
+              </p>
+              {m.warnings?.map((w, k) => (
+                <p key={k} className="max-w-[90%] px-1 text-[11px] text-amber-300/90">
+                  ⚠ {w}
+                </p>
+              ))}
+            </div>
+          ),
+        )}
 
-      {status === 'error' && error && (
-        <p className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-300">{error}</p>
-      )}
+        {loading && (
+          <div className="flex">
+            <p className="rounded-lg rounded-bl-sm bg-white/5 px-2.5 py-1.5 text-xs text-slate-400">
+              {hasPlan ? 'Editing…' : 'Drawing your plan…'}
+            </p>
+          </div>
+        )}
+        <div ref={endRef} />
+      </div>
 
-      {result && (
-        <div className="space-y-1 rounded bg-white/5 px-2 py-1.5 text-[11px] text-slate-300">
-          <p>{result.summary}</p>
-          {result.warnings.map((w, i) => (
-            <p key={i} className="text-amber-300/90">⚠ {w}</p>
-          ))}
-        </div>
-      )}
-
-      <p className="mt-auto text-[10px] leading-snug text-slate-500">
-        Generate replaces this floor; Edit changes it by chat ("add a window to the kitchen"); Furnish adds furniture. Each is one undo step — switch to 3D to walk it.
-      </p>
+      {/* Composer */}
+      <div className="border-t border-white/5 p-3">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={onKeyDown}
+          rows={2}
+          placeholder={hasPlan ? 'e.g. add a window to the kitchen' : 'e.g. A 2BHK apartment'}
+          className="w-full resize-none rounded-md border border-white/10 bg-white/5 p-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={loading || input.trim().length === 0}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {loading ? 'Working…' : hasPlan ? 'Send' : '🏠 Generate floor plan'}
+        </button>
+        <p className="mt-1.5 text-[10px] leading-snug text-slate-500">
+          Enter to send · Shift+Enter for a new line. Each change is one undo step — switch to 3D to walk it.
+        </p>
+      </div>
     </aside>
   );
 }

@@ -1,9 +1,14 @@
 # Iterative Editing — chat-driven edits to an existing plan
 
-> Status: **v1 built** (local edits). v2 (structural: resize/add/remove room) is
-> reserved behind the same wire and not yet built. The moat: turn the AI from a
-> one-shot generator into a design *conversation* — "add a window to the kitchen",
-> "rename bedroom 2 to a study", "clear the living room and add a sofa and TV".
+> Status: **v1 + v2 + v3 built**. v1 = local edits (furniture, openings, room
+> labels). v2/v3 = structural edits (resize / add / remove / swap a room) — they
+> come back as one `replaceFloor` op over the same wire. v3 (`surgical.py`) is the
+> default: it edits only the affected rooms and preserves untouched walls, doors,
+> and furniture exactly; v2 (`restructure.py`) is the always-works fallback that
+> re-flows the whole partition. The moat: turn the AI from a one-shot generator
+> into a design *conversation* — "add a window to the kitchen", "make the living
+> room bigger", "add a study", "swap the kitchen and dining", "clear the living
+> room and add a sofa and TV".
 
 This builds on the two existing AI endpoints (`/auto-furnish`, `/generate-plan`)
 and reuses, unchanged, the same boundary rule they follow:
@@ -63,22 +68,52 @@ pronoun resolution like "make *it* bigger"; nice-to-have, not required.)
 
 ---
 
-## Two classes of edit — and why v1 stops at the first
+## Two classes of edit
 
 | Class | Examples | Touches the wall partition? | Phase |
 |---|---|---|---|
 | **Local** | add/remove/move furniture, refurnish a room in a new style, add/remove a door or window, rename a room, change room type | No | **v1** |
-| **Structural** | resize a room, add a room, remove a room, swap two rooms | Yes — must re-flow the BSP, preserving other rooms' doors + furniture | v2 |
+| **Structural** | resize a room, add a room, remove a room, swap two rooms | Yes — surgically (v3), or a full re-flow (v2 fallback) | **v2/v3** |
 
 Local edits map 1:1 onto primitives that **already exist** in `planEdits.ts`, so
-v1 is mostly wiring + an LLM prompt + a resolver. Structural edits need the
-layout engine to re-partition while preserving identity, doors, and furniture of
-untouched rooms — a much harder problem, deferred to v2. The v1 command schema is
-designed to extend to it (see "Forward-compatibility").
+v1 is mostly wiring + an LLM prompt + a resolver (`worker/edits.py`).
 
-When a v1 request *is* structural ("make the living room bigger"), the worker
-detects it can't satisfy it locally and returns it in `warnings` so the UI can
-say "resizing rooms is coming soon" instead of silently doing nothing.
+Structural edits come back as one `replaceFloor` op, but `apply_edits` produces it
+two ways — it tries the surgical path first and falls back to the re-flow:
+
+**v3 — surgical (`worker/surgical.py`), the default.** A structural change should
+touch only what it must — "make the kitchen bigger" shouldn't move the living room
+or wipe a door you placed. `bsp_layout` lays rooms out as a clean **tiling of
+rectangles**, so v3 works in that rectangle domain:
+
+- **resize** moves the shared edge with a clean full-edge neighbour (only those
+  two rooms change);
+- **remove** lets a neighbour absorb the room's rectangle;
+- **add** splits a donor room into two;
+- **swap** exchanges two rooms' identity + furniture in place (no walls move).
+
+It then rebuilds the walls from the new rectangles and **re-maps the existing
+openings onto them by world coordinate** — captured *relative to each room edge*
+before the edit, so a door follows a wall that moves under a resize, stays put
+under a swap, and only the interior wall between two merged rooms is dropped.
+Untouched rooms keep their **exact** walls, openings, and furniture; the footprint
+never changes. A brand-new room gets a door on its split wall so it stays
+reachable.
+
+**v2 — full re-flow (`worker/restructure.py`), the fallback.** When the floor
+isn't a clean rectangle tiling (e.g. a hand-drawn L-shaped room) or an op has no
+clean target, `apply_surgical` returns `None` and the turn re-flows instead:
+derive the room **program** (name/type + area as weight), apply the change as a
+pure list edit, then re-flow inside the **same footprint** with `bsp_layout`.
+Footprint preserved, but untouched rooms move and openings regenerate. Always
+works — so v3 is a fidelity upgrade on the common case, never a correctness risk.
+
+Because either path replaces the entire floor, structural edits are **exclusive
+per turn** — they can't compose with id-level local ops (whose roomIds wouldn't
+survive the replace), so a turn is routed to one path or the other. `move_room`
+is intentionally not implemented (ambiguous for a space-filling partition); the
+model is steered toward `swap_rooms` instead, and a stray `move`/`unsupported`
+still degrades into a warning.
 
 ---
 
@@ -135,7 +170,7 @@ type EditPatchOp =
   | { op: 'removeOpening'; ids: ID[] }
   | { op: 'setRoomName';   roomId: ID; name: string }
   | { op: 'setRoomType';   roomId: ID; type: RoomType }
-  // v2 (reserved now, no v1 command emits it): a full re-flow of one floor.
+  // v2/v3 (structural edits): a whole-floor replacement (surgical or re-flow).
   | { op: 'replaceFloor';  points: GenPoint[]; walls: GenWall[]; openings: GenOpening[];
                            furniture: GenFurniture[]; rooms: GenRoomMeta[] };
 
@@ -156,7 +191,7 @@ The `op` → `planEdits` mapping in `applyEditPatch`:
 | `removeOpening` | `deleteOpening(plan, floorId, id)` per id |
 | `setRoomName` | `setRoomName(plan, floorId, roomId, name)` |
 | `setRoomType` | `setRoomType(plan, floorId, roomId, type)` |
-| `replaceFloor` (v2) | same path as `applyGeneratedPlan` |
+| `replaceFloor` (v2/v3) | same path as `applyGeneratedPlan` |
 
 `applyEditPatch` folds the ops left-to-right into a single draft `Plan` and
 returns it; `AssistantPanel` wraps the whole thing in one `commit`.
@@ -176,8 +211,13 @@ The worker resolves the LLM's loose handles against the floor the frontend sent:
 - **Opening wall**: classify the room's walls into exterior/interior (a wall is
   interior iff it borders two rooms), then pick one matching the requested
   `wall` hint and a sensible offset; the frontend's `addOpening` re-clamps.
-- **Ambiguity** (e.g. two unnamed bedrooms): resolve to the best match and note
-  it in `warnings`; the single undo step is the user's safety net.
+- **Ambiguity** (e.g. two bedrooms and the user says "the bedroom"): the worker
+  **clarifies back** instead of guessing — `_pending_clarification` detects a room
+  handle that matches more than one room (or a `clarify` op the model emits for a
+  vague request) and returns an empty patch with a question as the `summary`. The
+  user's next message answers it; the replayed history gives the model the
+  original intent, so "Bedroom 2" completes the pending resize. An empty patch
+  means no commit, so a question never costs an undo step.
 
 New furniture coordinates come from the **existing step-2 solver**, run against
 the resolved room's rectangle plus its existing furniture as fixed obstacles, so
@@ -200,7 +240,11 @@ additions don't overlap what's already there. No new geometry engine.
   classification for openings; commands applied sequentially on a deep-copied
   working floor) and `summarize_floor(floor)` for the prompt. No network.
 - `app.py` — `POST /edit-plan`.
-- `worker/tests/test_edits.py` *(new)* — 14 tests, fake-LLM/offline.
+- `restructure.py` *(v2)* — structural re-flow (the fallback): program → `bsp_layout`.
+- `surgical.py` *(v3)* — surgical structural edits (the default): rectangle-domain
+  ops + box-relative opening re-map; falls back to v2 when the tiling isn't clean.
+- `worker/tests/test_edits.py` *(new)* — fake-LLM/offline; `test_restructure.py`
+  (v2) and `test_surgical.py` (v3) cover the structural geometry directly.
 
 **Gateway (Node)**
 - `vite.config.ts` — `/api/design/edit-plan` in `ROUTES`; 503 when offline (the
@@ -214,21 +258,26 @@ additions don't overlap what's already there. No new geometry engine.
 - `src/lib/aiPipeline/applyEditPatch.ts` *(new)* — `applyEditPatch(plan, floorId, res): Plan`.
 - `src/lib/aiPipeline/applyEditPatch.test.ts` *(new)* — 10 tests (each op, no input
   mutation, unknown ops ignored, rejected opening dropped).
-- `src/components/Panels/AssistantPanel.tsx` — a third action, **"✏️ Edit plan"**,
-  enabled once the active floor has rooms; shows `summary`/`warnings`.
+- `src/components/Panels/AssistantPanel.tsx` — the **chat shell**: one
+  conversation that auto-routes (first message generates a plan, every message
+  after edits it live), shows each reply's `summary`/`warnings` as assistant
+  bubbles, and replays recent turns to the worker for reference resolution.
 
 ---
 
-## Forward-compatibility with structural edits (v2)
+## How structural edits (v2/v3) reuse the v1 wire
 
-- The patch is a **list of typed ops**, so v2 adds `resizeRoom` / `addRoom` /
-  `removeRoom` resolution that emits a `replaceFloor` op (or, later, finer-grained
-  wall ops) without changing the wire envelope or `applyEditPatch`'s contract.
-- The `replaceFloor` op is reserved now so the frontend adapter already knows how
-  to apply a full re-flow (it reuses the `applyGeneratedPlan` path), and v2 is
-  purely worker-side work.
-- Because the floor is sent every call and the result is one undo step, a v2
-  re-flow is still a single, undoable commit — no architectural change.
+- The patch is a **list of typed ops**, so the structural ops `resize_room` /
+  `add_room` / `remove_room` / `swap_rooms` resolve (in `worker/surgical.py`, or
+  `worker/restructure.py` as fallback) to a single `replaceFloor` op — without
+  changing the wire envelope or `applyEditPatch`'s contract. v3 emits the **same**
+  `replaceFloor` shape as v2; the only difference is that the geometry that comes
+  back is locally stable, so the frontend never had to change for it.
+- `replaceFloor` reuses the frontend's `applyGeneratedPlan` path, so all of
+  v2 **and** v3 was **purely worker-side** work — no frontend change beyond the op
+  that was already reserved.
+- Because the floor is sent every call and the result is one undo step, a
+  structural edit is still a single, undoable commit — no architectural change.
 
 ---
 

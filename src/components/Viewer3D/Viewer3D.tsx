@@ -26,7 +26,7 @@ import { CM, WALL_H } from './constants';
 import { makePlasterTexture } from './textures';
 import { WallMesh } from './WallMesh';
 import { RoomSlab } from './RoomSlab';
-import { FurnitureMesh } from './FurnitureMesh';
+import { FurnitureItem } from './FurnitureItem';
 import { PostFX } from './PostFX';
 
 extend({ THREE });
@@ -104,7 +104,7 @@ function FloorGroup({ floor, yOffset, wallTex }: {
         />
       ))}
       {floor.furniture.map((item) => (
-        <FurnitureMesh key={item.id} item={item} />
+        <FurnitureItem key={item.id} item={item} />
       ))}
     </group>
   );

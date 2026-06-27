@@ -69,6 +69,45 @@ describe('computeWallQuads', () => {
     near(w2.corners[3], [-5, -5]);
   });
 
+  it('a T-junction: the through-wall stays straight, the stem butts in cleanly', () => {
+    // The dominant junction in every generated plan — a perpendicular interior
+    // wall (the stem) meeting a straight run (left+right collinear) at V=(0,0).
+    const quads = computeWallQuads(
+      [pt('A', -100, 0), pt('V', 0, 0), pt('B', 100, 0), pt('S', 0, 100)],
+      [wall('left', 'A', 'V', 10), wall('right', 'V', 'B', 10), wall('stem', 'V', 'S', 10)],
+    );
+    const left = quads.get('left')!;
+    const right = quads.get('right')!;
+    const stem = quads.get('stem')!;
+    // Through-side (away from the stem, y=-5): left and right meet exactly at
+    // (0,-5), so the run reads as one continuous straight edge across V.
+    near(left.corners[2], [0, -5]); // left rightB
+    near(right.corners[3], [0, -5]); // right rightA
+    // Stem-side (y=+5): each through-wall's inner corner coincides with the
+    // stem's matching corner — no gap, no overlap at the reentrant corners.
+    near(left.corners[1], [-5, 5]); // left leftB  == stem leftA
+    near(stem.corners[0], [-5, 5]);
+    near(right.corners[0], [5, 5]); // right leftA == stem rightA
+    near(stem.corners[3], [5, 5]);
+  });
+
+  it('a 4-way cross: every arm miters to the central square corners', () => {
+    // Four arms meeting at one point. BSP layouts offset their splits into
+    // T-junctions, so generated plans never produce this — it is only reachable
+    // by a hand-drawn wall. Each arm cleanly miters its end to the corners of the
+    // 10×10 centre square (±halfT, ±halfT); the run-through sides stay flush.
+    const quads = computeWallQuads(
+      [pt('V', 0, 0), pt('N', 0, -100), pt('S', 0, 100), pt('E', 100, 0), pt('W', -100, 0)],
+      [wall('n', 'V', 'N', 10), wall('s', 'V', 'S', 10), wall('e', 'V', 'E', 10), wall('w', 'V', 'W', 10)],
+    );
+    // North arm's V-end spans the top edge of the centre square: (5,-5)→(-5,-5).
+    near(quads.get('n')!.corners[0], [5, -5]);
+    near(quads.get('n')!.corners[3], [-5, -5]);
+    // East arm's V-end spans the right edge: (5,5)→(5,-5).
+    near(quads.get('e')!.corners[0], [5, 5]);
+    near(quads.get('e')!.corners[3], [5, -5]);
+  });
+
   it('clamps an extremely acute miter to a butt end (no spike)', () => {
     // Two nearly-parallel walls sharing V would otherwise miter to a huge spike.
     const quads = computeWallQuads(

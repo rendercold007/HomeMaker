@@ -18,11 +18,20 @@ Input is the current active floor, exactly as the frontend serialises it (cm):
     }
 
 v1 handles LOCAL edits (furniture, openings, room name/type) that never touch
-the wall graph. STRUCTURAL edits (resize/add/remove/swap a room) re-flow the
-partition and live in restructure.py (v2); they come back as one `replaceFloor`
-op. apply_edits routes a turn to one path or the other — a full re-flow can't
-compose with id-level local ops in the same patch, so structural edits are
-exclusive per turn (any local ops in the same turn are skipped with a note).
+the wall graph. STRUCTURAL edits (resize/add/remove/swap a room) come back as one
+`replaceFloor` op, via one of two paths (apply_edits tries the first, falls back
+to the second):
+
+  - v3 SURGICAL (surgical.py): edits only the affected rectangles and re-maps the
+    existing openings, so untouched rooms keep their exact walls/doors/furniture.
+  - v2 RE-FLOW (restructure.py): regenerates the whole partition from a room
+    program. Always works (e.g. for non-rectangular hand-drawn floors), but moves
+    untouched rooms and regenerates openings.
+
+apply_edits routes a turn to the local path or the structural path — replacing
+the whole floor can't compose with id-level local ops in the same patch, so
+structural edits are exclusive per turn (any local ops in the same turn are
+skipped with a note).
 """
 
 from __future__ import annotations
@@ -37,6 +46,7 @@ from restructure import (
     build_program,
     restructure,
 )
+from surgical import apply_surgical
 from solver import (
     FurnitureSpec,
     Room,
@@ -99,24 +109,37 @@ def _wall_len(floor: dict, wall: dict) -> float:
     return abs(a["x"] - b["x"]) + abs(a["y"] - b["y"])  # axis-aligned
 
 
-def _resolve_room(floor: dict, handle) -> dict | None:
-    """Match a loose room handle (name or type) to a room the client sent."""
+def _match_rooms(floor: dict, handle) -> list[dict]:
+    """All rooms matching a loose handle, at the most specific tier that hits.
+
+    Exact name wins; else exact type; else a fuzzy contains. Returns every match
+    at that tier — so >1 means the handle is genuinely ambiguous (e.g. "bedroom"
+    with two bedrooms), which the clarify-back path uses to ask instead of guess.
+    `_resolve_room` is just "the first of these".
+    """
     h = str(handle or "").strip().lower()
     if not h:
-        return None
+        return []
     rooms = floor.get("rooms", [])
-    for r in rooms:  # exact name
-        if str(r.get("name", "")).strip().lower() == h:
-            return r
-    for r in rooms:  # exact type
-        if str(r.get("type", "")).strip().lower() == h:
-            return r
-    for r in rooms:  # fuzzy contains, e.g. "living" ~ "Living Room"
+    exact_name = [r for r in rooms if str(r.get("name", "")).strip().lower() == h]
+    if exact_name:
+        return exact_name
+    exact_type = [r for r in rooms if str(r.get("type", "")).strip().lower() == h]
+    if exact_type:
+        return exact_type
+    fuzzy = []
+    for r in rooms:
         name = str(r.get("name", "")).lower()
         typ = str(r.get("type", "")).lower()
         if h in name or name in h or (typ and typ in h):
-            return r
-    return None
+            fuzzy.append(r)
+    return fuzzy
+
+
+def _resolve_room(floor: dict, handle) -> dict | None:
+    """Match a loose room handle (name or type) to a room the client sent."""
+    matches = _match_rooms(floor, handle)
+    return matches[0] if matches else None
 
 
 def _inside(bbox, x: float, y: float) -> bool:
@@ -426,6 +449,48 @@ _HANDLERS = {
 # Top-level                                                                   #
 # --------------------------------------------------------------------------- #
 
+def _oxford(names: list[str]) -> str:
+    names = [n for n in names if n]
+    if len(names) <= 1:
+        return names[0] if names else ""
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
+def _clarify(question: str) -> dict:
+    """A clarify-back turn: no patch (so no commit/undo step), just a question."""
+    return {"patch": [], "summary": question, "warnings": [], "needsInput": True}
+
+
+def _pending_clarification(floor: dict, cmds: list[dict]) -> dict | None:
+    """Ask a question instead of guessing when the request is under-specified.
+
+    Two triggers: the model itself emitted a `clarify` op (a vague request it
+    couldn't pin down), or a command references a room handle that matches more
+    than one room. Either way we return a clarify response and apply nothing; the
+    user's next message answers it (history gives the model the original intent).
+    """
+    for c in cmds:
+        if str(c.get("op", "")).strip() == "clarify":
+            q = str(c.get("question") or "").strip()
+            return _clarify(q or "Could you tell me a bit more about what you'd like to change?")
+
+    for c in cmds:
+        for key in ("room", "with"):
+            handle = c.get(key)
+            if not handle:
+                continue
+            matches = _match_rooms(floor, handle)
+            if len(matches) > 1:
+                names = [str(m.get("name") or m.get("type") or "a room") for m in matches]
+                return _clarify(
+                    f"There's more than one room matching “{handle}”: "
+                    f"{_oxford(names)}. Which one did you mean?"
+                )
+    return None
+
+
 def _summary_text(summary: list[str], warnings: list[str]) -> str:
     if summary:
         text = "; ".join(summary)
@@ -435,31 +500,56 @@ def _summary_text(summary: list[str], warnings: list[str]) -> str:
     return "No changes."
 
 
-def _apply_structural_edits(floor: dict, cmds: list[dict]) -> dict:
-    """Re-flow the partition for a structural turn → one `replaceFloor` op.
-
-    Structural edits are exclusive: a full re-flow replaces the whole floor, so
-    it can't compose with id-level local ops (their roomIds wouldn't exist after
-    the replace). All structural commands fold into one program edit + one
-    re-flow; any local ops in the same turn are skipped with a note.
-    """
-    program = build_program(floor)
-    summary: list[str] = []
-    warnings: list[str] = []
-    changed = 0
-
+def _structural_notes(cmds: list[dict], warnings: list[str]) -> None:
+    """Warn about non-structural ops the structural turn can't carry."""
     for cmd in cmds:
         op = str(cmd.get("op", "")).strip()
         if op in STRUCTURAL_OPS:
-            if apply_structural_command(program, cmd, summary, warnings):
-                changed += 1
-        elif op in _DEFERRED_STRUCTURAL:
+            continue
+        if op in _DEFERRED_STRUCTURAL:
             warnings.append(
                 "Moving rooms isn't supported yet — try swapping two rooms, or "
                 "resizing / adding / removing one."
             )
         else:
             warnings.append(f"Skipped '{op}' — structural edits are applied on their own.")
+
+
+def _apply_structural_edits(floor: dict, cmds: list[dict]) -> dict:
+    """Apply a structural turn → one `replaceFloor` op.
+
+    Tries the SURGICAL path first (surgical.py, v3): it edits only the affected
+    rectangles and re-maps the existing openings, so untouched rooms keep their
+    exact walls/doors/furniture. If the floor isn't a clean rectangle tiling, or
+    an op has no clean target, it falls back to the v2 full RE-FLOW
+    (restructure.py), which always works but regenerates the whole partition.
+
+    Structural edits are exclusive: replacing the whole floor can't compose with
+    id-level local ops (their roomIds wouldn't survive), so any local ops in the
+    same turn are skipped with a note.
+    """
+    structural = [c for c in cmds if str(c.get("op", "")).strip() in STRUCTURAL_OPS]
+
+    # --- v3: surgical, opening-preserving --------------------------------- #
+    res = apply_surgical(floor, structural)
+    if res is not None:
+        warnings = list(res["warnings"])
+        _structural_notes(cmds, warnings)
+        return {
+            "patch": res["patch"],
+            "summary": _summary_text(res["summary"], warnings),
+            "warnings": warnings,
+        }
+
+    # --- v2 fallback: full re-flow ---------------------------------------- #
+    program = build_program(floor)
+    summary: list[str] = []
+    warnings = []
+    changed = 0
+    for cmd in structural:
+        if apply_structural_command(program, cmd, summary, warnings):
+            changed += 1
+    _structural_notes(cmds, warnings)
 
     patch: list[dict] = []
     if changed:
@@ -482,6 +572,12 @@ def apply_edits(floor: dict, commands: list[dict]) -> dict:
     """
     floor = copy.deepcopy(floor)
     cmds = [c for c in (commands or []) if isinstance(c, dict)]
+
+    # Ask before acting when the request is ambiguous or the model flagged it as
+    # unclear — this short-circuits both the structural and local paths below.
+    clarify = _pending_clarification(floor, cmds)
+    if clarify is not None:
+        return clarify
 
     if any(str(c.get("op", "")).strip() in STRUCTURAL_OPS for c in cmds):
         return _apply_structural_edits(floor, cmds)

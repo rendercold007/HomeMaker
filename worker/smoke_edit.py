@@ -157,10 +157,10 @@ def main() -> int:
         "rename the bedroom to master bedroom",                 # rename_room
         "turn the kitchen into a study",                        # set_room_type
         "clear out the living room and put in a sofa and a tv", # compose: remove all + add
-        "make the living room bigger",                          # structural → resize_room re-flow
-        "add a study",                                          # structural → add_room re-flow
-        "swap the kitchen and the bedroom",                     # structural → swap_rooms re-flow
-        "delete the kitchen",                                   # structural → remove_room re-flow
+        "make the living room bigger",                          # structural → surgical resize_room
+        "add a study",                                          # structural → surgical add_room
+        "swap the kitchen and the bedroom",                     # structural → surgical swap_rooms
+        "delete the kitchen",                                   # structural → surgical remove_room
     ]
     for prompt in single_shot:
         run_turn(client, sample_floor(), prompt, history=[])
@@ -184,7 +184,8 @@ def main() -> int:
         history.append({"prompt": prompt, "summary": result["summary"]})
 
     print("\nDone. Eyeball the commands/patches above — are rooms resolved correctly, "
-          "ops valid, and structural asks re-flowed (replaceFloor with the right rooms)?")
+          "ops valid, and structural asks handled surgically (replaceFloor with the right "
+          "rooms, openings preserved)?")
     return 0
 
 

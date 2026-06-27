@@ -134,6 +134,105 @@ Client Action: React receives this JSON, updates the Zustand global store. Three
 
 4. Wire up the DB: Finally, add the Vector database to dynamically source the real .glb asset links. 
 
+### Status — real 3D assets (Tier 2 #4), frontend-first
+
+The frontend half of step 4 is built **without** the vector DB. Rather than the
+worker resolving `type → asset_id`, the 3D view maps `furniture.type → .glb`
+directly and loads it with drei `useGLTF`, auto-fitting each model to its catalog
+footprint and resting it on the floor (`computeFitTransform`). Missing or broken
+models fall back to the hand-built procedural mesh (`FurnitureMesh`) through a
+`<Suspense>` + error boundary, so the scene never breaks. Models are
+**auto-discovered**: any `<type>.glb` dropped into `src/assets/models/` is wired
+up by an `import.meta.glob` in `furnitureAssets.ts` — no list to maintain, and
+types without a file render procedurally with no network request (no 404s).
+Per-model corrections (orientation, fixed scale, wall-mounting) go in the small
+`ASSET_OVERRIDES` map. See `src/assets/models/README.md`.
+
+The vector DB stays deferred: it only earns its keep once the LLM emits
+free-text item names outside the fixed catalog. Today the worker emits canonical
+catalog `type`s, so a static manifest covers the visual win. When off-catalog
+items appear, add the worker-side embedding lookup to resolve them to a `type`
+(or directly to an asset) and the same frontend loader renders the result.
+
+### Status — entrance-aware layout (Tier 2 #5, step 1)
+
+`generate_plan` now respects the **entrance side**. The LLM extracts it from the
+prompt as pure intent — `build_room_program_prompt` asks for an optional
+top-level `"entrance": "N|S|E|W"` alongside the room list, and
+`parse_room_program` surfaces it on a `RoomProgram` (rooms + entrance).
+`generate_plan(plot, rooms, entrance=…)` then (a) places the front door on an
+exterior wall of that side — preferring a public room (living/dining) there and
+the longest such wall — and (b) floats public rooms toward that side in the BSP
+order (`_bias_for_entrance`: front of the list for N/W, back for E/S). The bias
+is a best-effort tendency, not a guarantee; the **door placement is exact**.
+`entrance=None` is byte-identical to the prior behaviour (no regression). The
+side comes from the prompt; `app.py` also accepts an explicit `plot.entrance`
+as a fallback if the frontend sends one. Coordinates remain 100% deterministic —
+the LLM only names the side.
+
+### Status — circulation / hallways (Tier 2 #5, step 2)
+
+Once a plan has enough rooms (`MIN_ROOMS_FOR_CORRIDOR`, currently 4),
+`generate_plan` carves a **straight spine corridor** instead of butting every
+room against its neighbours, so rooms open onto a hallway rather than onto each
+other (no more shotgun/railroad layouts). `layout_with_corridor` runs the spine
+perpendicular to the entrance wall so it reaches the front door — a N/S entrance
+gives a vertical full-height spine, an E/W entrance a horizontal full-width one;
+with no entrance it follows the longer axis. Rooms are weight-split onto the two
+sides and each side is laid out by the existing `bsp_layout`, so the plot still
+tiles exactly and the wall graph stays planar (Euler's `faces = E - V + 1` still
+equals rooms + 1). In `place_openings` the corridor is the connectivity **hub**:
+the spanning tree prefers corridor edges first (rooms hang off the hall), the
+front door opens into the corridor on the requested side, and the `hallway`
+"room" has no furniture template so it stays clear. `entrance=None` / fewer than
+the threshold rooms keep the prior direct-connection behaviour.
+
+### Status — L-shape / irregular envelopes (Tier 2 #5, step 3)
+
+`generate_plan` now respects an **L-shaped footprint**. Like the entrance, the
+shape is pure intent: the LLM extracts an optional `"shape": "rectangular|lshape"`
+from the prompt (`normalize_shape` also maps "irregular" → lshape), and `app.py`
+falls back to an explicit `plot.shape`. When the shape is `lshape` (and there are
+≥2 rooms), `lshape_layout` lays the rooms into the bounding box **minus a corner
+notch**: the L splits cleanly into two rectangles (a full-length wing + a shorter
+block beside the notch), rooms are divided between them by area, and each is laid
+out by the existing `bsp_layout`. The two wings tile the L exactly, so the
+shape-agnostic `build_graph` produces a planar wall graph with the notch as
+exterior (Euler's `faces = E - V + 1` still equals the room count, verified for
+all four notch corners — no diagonal walls). The notch corner is chosen to avoid
+the entrance wall (`notch_corner`), so the front of the house stays a full wing,
+and the front door + furniture placement (both already shape-agnostic) work
+unchanged.
+
+Known v1 limits: the L and the spine corridor don't compose yet (an `lshape`
+plan skips the corridor — its wings already break the footprint up), and
+"irregular" is approximated by a single L. Both are future refinements.
+
+Tier 2 #5 (smarter layout) is now complete: entrance-aware → circulation →
+L-shape.
+
+### Status — wall joins & mitering (Tier 2 #6)
+
+Done (frontend, pure logic in `src/model/miter.ts`). A wall is a centreline
+segment with a thickness; rendered naively, two walls meeting at a vertex overlap
+on the inside and leave a triangular notch outside. `computeWallQuads` replaces
+each wall end's square butt with the true miter — the intersection of its side
+edge with its angular neighbour's facing edge at the shared vertex — and returns
+one four-corner quad per wall. `wallEdgePoint` reads a point on either offset
+edge (mitered ends, square cuts at openings); **both renderers share it**, so the
+2D fill (`WallsLayer`) and the 3D extrusion (`WallMesh`/`Viewer3D`) agree exactly.
+Free ends butt square; collinear runs stay seamless; acute spikes are clamped to a
+butt past `MITER_LIMIT` (6× half-thickness). L-corners and **T-junctions** (the
+dominant case — BSP offsets its splits into Ts, never 4-way crosses) miter with no
+gap or overlap, verified in `src/model/miter.test.ts`.
+
+Known limit: an exact **4-way cross** (four arms at one point) leaves a small
+centre-square gap. BSP layouts never produce one, so it is only reachable by a
+hand-drawn wall; filling it is a future refinement.
+
+That closes Tier 2. Next is **Tier 3** — persistence/accounts, export polish
+(PNG/PDF → DXF), then latency/cost (`docs/CLAUDE.md` Phase 6). 
+
 https://gemini.google.com/u/1/app/c2dfd59f7952a0e2?pageId=none 
 
 3/3 

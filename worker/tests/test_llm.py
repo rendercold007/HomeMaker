@@ -11,9 +11,13 @@ from llm import (
     MAX_EDIT_HISTORY,
     build_edit_messages,
     build_edit_prompt,
+    build_room_program_prompt,
     build_system_prompt,
     build_user_prompt,
     extract_edit_commands,
+    normalize_entrance,
+    normalize_shape,
+    parse_room_program,
     parse_shopping_list,
 )
 from contract import RoomDimensions, RoomSpec
@@ -89,6 +93,67 @@ class TestEditPrompt(unittest.TestCase):
         p = build_edit_prompt("FLOOR").lower()
         self.assertIn("unsupported", p)
         self.assertIn("never an empty list", p)
+
+    def test_teaches_clarify_op(self):
+        # Tier 1 #2: the model can ask back instead of guessing on a vague request.
+        p = build_edit_prompt("FLOOR")
+        self.assertIn("clarify", p)
+        self.assertIn("question", p.lower())
+
+    def test_room_program_prompt_asks_for_entrance(self):
+        # Tier 2 #5: the program prompt must request an optional entrance side.
+        p = build_room_program_prompt()
+        self.assertIn("entrance", p.lower())
+        for side in ("N", "S", "E", "W"):
+            self.assertIn(side, p)
+
+    def test_room_program_prompt_asks_for_shape(self):
+        # Tier 2 #5 step 3: the prompt must request an optional footprint shape.
+        p = build_room_program_prompt().lower()
+        self.assertIn("shape", p)
+        self.assertIn("lshape", p)
+
+
+class TestRoomProgramParsing(unittest.TestCase):
+    def test_parses_rooms_and_entrance(self):
+        prog = parse_room_program(
+            '{"rooms": [{"name": "Living", "type": "living", "weight": 3}], "entrance": "S"}'
+        )
+        self.assertEqual(len(prog.rooms), 1)
+        self.assertEqual(prog.rooms[0].type, "living")
+        self.assertEqual(prog.entrance, "S")
+
+    def test_missing_entrance_is_none(self):
+        prog = parse_room_program('{"rooms": [{"name": "Bed", "type": "bedroom"}]}')
+        self.assertIsNone(prog.entrance)
+        self.assertEqual(prog.rooms[0].type, "bedroom")
+
+    def test_normalize_entrance_accepts_words_and_letters(self):
+        self.assertEqual(normalize_entrance("south"), "S")
+        self.assertEqual(normalize_entrance("N"), "N")
+        self.assertEqual(normalize_entrance("East"), "E")
+        self.assertIsNone(normalize_entrance(None))
+        self.assertIsNone(normalize_entrance("up"))
+        self.assertIsNone(normalize_entrance(""))
+
+    def test_parses_shape(self):
+        prog = parse_room_program(
+            '{"rooms": [{"name": "Living", "type": "living"}], "shape": "L-shaped"}'
+        )
+        self.assertEqual(prog.shape, "lshape")
+
+    def test_missing_shape_is_none(self):
+        prog = parse_room_program('{"rooms": [{"name": "Bed", "type": "bedroom"}]}')
+        self.assertIsNone(prog.shape)
+
+    def test_normalize_shape_variants(self):
+        for v in ("lshape", "L-shape", "l shaped", "irregular", "L_SHAPE"):
+            self.assertEqual(normalize_shape(v), "lshape", v)
+        for v in ("rectangular", "rectangle", "square"):
+            self.assertEqual(normalize_shape(v), "rectangular", v)
+        self.assertIsNone(normalize_shape(None))
+        self.assertIsNone(normalize_shape("hexagon"))
+        self.assertIsNone(normalize_shape(""))
 
 
 class TestEditMessages(unittest.TestCase):
