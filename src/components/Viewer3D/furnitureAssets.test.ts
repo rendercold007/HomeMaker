@@ -72,4 +72,11 @@ describe('manifest (auto-discovered from src/assets/models)', () => {
     // sofa.glb is committed under src/assets/models, so it must auto-wire.
     expect(hasAsset('sofa')).toBe(true);
   });
+
+  it('excludes kitchen_counter even though its file exists (renders procedurally)', () => {
+    // The kitchen_counter.glb on disk is a full kitchen run, not a single
+    // counter; it's deliberately excluded so it falls back to the procedural
+    // mesh. See EXCLUDED_TYPES in furnitureAssets.ts.
+    expect(hasAsset('kitchen_counter')).toBe(false);
+  });
 });

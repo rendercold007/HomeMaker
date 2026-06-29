@@ -153,6 +153,11 @@ Everything in `src/model/` must have **zero React imports** and be covered by Vi
 
 The 3D view is a pure function of the `Plan`. Each wall extrudes to a box of its `thickness` × `height`, split into segments around door/window openings. Room floors are filled `THREE.Shape`s; furniture maps to simple meshes by type. Coordinate mapping: cm ÷ 100 → metres, and 2D `y` → 3D `z` (depth). Never store 3D-only state back into the model.
 
+**Two rendering modes (Planner5D-style).** Realism in real-time rasterising is capped — no global illumination, fake shadows. So like Planner5D (whose photoreal images are offline ray-traces, not its live view) the viewer has two modes off the *same* scene:
+
+- **Edit/orbit view** — the fast rasteriser. Real-time, interactive. Lit by an HDR `Environment` + key/fill/bounce lights, with N8AO ambient occlusion, ACES tone-mapping, bloom and SMAA in `PostFX.tsx`. (Use **N8AO**, not the legacy `SSAO` effect — `SSAO` silently no-ops without a NormalPass.)
+- **Render mode** — the "Render" button swaps in an in-browser GPU **path tracer** (`@react-three/gpu-pathtracer`) that progressively converges the current view to a photoreal frame (true GI, soft shadows, reflections). It wraps the same `world` JSX; the rasteriser-only fakes (`SoftShadows`, `ContactShadows`) and `PostFX` are skipped, and the renderer's own tone-mapping is switched on. It's GPU-heavy: many large textured GLBs at once can OOM weaker/integrated GPUs, and it needs a foreground tab to accumulate (background tabs throttle rAF).
+
 ### Working style
 
 - **Prefer targeted edits over rewrites.** When fixing a bug, change the specific lines responsible — don't regenerate whole files.

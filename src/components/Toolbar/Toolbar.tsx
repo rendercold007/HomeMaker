@@ -35,7 +35,7 @@ function ToolBtn({ active, disabled, onClick, title, children }: {
       title={title}
       className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all active:scale-95 ${
         active
-          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+          ? 'bg-zinc-700 text-white shadow-sm shadow-black/40'
           : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
       } ${disabled ? 'cursor-not-allowed opacity-30' : ''}`}
     >
@@ -87,7 +87,7 @@ export function Toolbar() {
           type="checkbox"
           checked={grid.visible}
           onChange={(e) => setGrid({ visible: e.target.checked })}
-          className="accent-indigo-500"
+          className="accent-zinc-500"
         />
         Grid
       </label>
@@ -96,14 +96,14 @@ export function Toolbar() {
           type="checkbox"
           checked={grid.snap}
           onChange={(e) => setGrid({ snap: e.target.checked })}
-          className="accent-indigo-500"
+          className="accent-zinc-500"
         />
         Snap
       </label>
       <select
         value={grid.sizeCm}
         onChange={(e) => setGrid({ sizeCm: Number(e.target.value) })}
-        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-slate-400 focus:outline-none focus:border-indigo-500"
+        className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-slate-400 focus:outline-none focus:border-zinc-500"
       >
         {[15, 30, 50, 100].map((s) => (
           <option key={s} value={s} className="bg-slate-900">{s} cm</option>

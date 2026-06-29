@@ -14,3 +14,7 @@ export const DOOR_H = 2.1;
 export const SILL_H = 0.9;
 /** Window lintel height (m). */
 export const LINTEL_H = 2.1;
+/** Skirting board (baseboard) height (m). */
+export const SKIRT_H = 0.1;
+/** How far skirting / window sills stand proud of the wall face (m). */
+export const TRIM_PROUD = 0.02;

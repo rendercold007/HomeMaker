@@ -147,7 +147,7 @@ export function AssistantPanel() {
         {messages.map((m, i) =>
           m.role === 'user' ? (
             <div key={i} className="flex justify-end">
-              <p className="max-w-[85%] rounded-lg rounded-br-sm bg-indigo-600 px-2.5 py-1.5 text-xs text-white">
+              <p className="max-w-[85%] rounded-lg rounded-br-sm bg-zinc-700 px-2.5 py-1.5 text-xs text-white">
                 {m.text}
               </p>
             </div>
@@ -189,13 +189,13 @@ export function AssistantPanel() {
           onKeyDown={onKeyDown}
           rows={2}
           placeholder={hasPlan ? 'e.g. add a window to the kitchen' : 'e.g. A 2BHK apartment'}
-          className="w-full resize-none rounded-md border border-white/10 bg-white/5 p-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-indigo-400 focus:outline-none"
+          className="w-full resize-none rounded-md border border-white/10 bg-white/5 p-2 text-xs text-slate-100 placeholder:text-slate-500 focus:border-zinc-300 focus:outline-none"
         />
         <button
           type="button"
           onClick={handleSend}
           disabled={loading || input.trim().length === 0}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-zinc-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? 'Working…' : hasPlan ? 'Send' : '🏠 Generate floor plan'}
         </button>

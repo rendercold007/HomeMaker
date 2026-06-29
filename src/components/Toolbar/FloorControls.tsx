@@ -42,7 +42,7 @@ export function FloorControls() {
             title={`Floor ${floorLabel(f.level)}`}
             className={`min-w-[22px] rounded-md px-2 py-1 text-xs font-semibold transition-all ${
               f.id === activeFloorId
-                ? 'bg-indigo-600 text-white shadow shadow-indigo-500/30'
+                ? 'bg-zinc-700 text-white shadow shadow-black/40'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >

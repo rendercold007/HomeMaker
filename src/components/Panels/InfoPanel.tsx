@@ -20,19 +20,19 @@ function RoomEditor({ room, floorId }: { room: Room; floorId: ID }) {
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-semibold text-indigo-400">Room</p>
+      <p className="text-xs font-semibold text-zinc-300">Room</p>
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
         onBlur={commitName}
         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
         placeholder="Room name"
-        className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+        className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-200 focus:border-zinc-500 focus:outline-none"
       />
       <select
         value={room.type}
         onChange={(e) => commit(setRoomType(plan, floorId, room.id, e.target.value as RoomType))}
-        className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 focus:border-indigo-500 focus:outline-none"
+        className="w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 focus:border-zinc-500 focus:outline-none"
       >
         {ROOM_TYPES.map((t) => (
           <option key={t.type} value={t.type} className="bg-slate-900">{t.label}</option>
@@ -80,20 +80,20 @@ export function InfoPanel() {
     }
     if (selection.kind === 'wall' && selectedWall) return (
       <div className="space-y-0.5">
-        <p className="text-xs font-semibold text-indigo-400">Wall segment</p>
+        <p className="text-xs font-semibold text-zinc-300">Wall segment</p>
         <p className="text-xs text-slate-400">{formatLength(wallLength)} · {selectedWall.thickness}cm thick</p>
         <p className="text-[10px] text-slate-600 mt-1">Del to delete</p>
       </div>
     );
     if (selection.kind === 'point') return (
       <div>
-        <p className="text-xs font-semibold text-indigo-400">Vertex</p>
+        <p className="text-xs font-semibold text-zinc-300">Vertex</p>
         <p className="text-[10px] text-slate-600 mt-1">Drag to move · Del to remove</p>
       </div>
     );
     if (selection.kind === 'opening' && selectedOpening) return (
       <div>
-        <p className="text-xs font-semibold text-indigo-400">{selectedOpening.kind === 'door' ? '🚪 Door' : '🪟 Window'}</p>
+        <p className="text-xs font-semibold text-zinc-300">{selectedOpening.kind === 'door' ? '🚪 Door' : '🪟 Window'}</p>
         <p className="text-xs text-slate-400">{formatLength(selectedOpening.width)} wide</p>
         <p className="text-[10px] text-slate-600 mt-1">Del to delete</p>
       </div>
@@ -102,7 +102,7 @@ export function InfoPanel() {
       const def = getFurnitureDef(selectedFurniture.type);
       return (
         <div>
-          <p className="text-xs font-semibold text-indigo-400">{def?.label ?? selectedFurniture.type}</p>
+          <p className="text-xs font-semibold text-zinc-300">{def?.label ?? selectedFurniture.type}</p>
           <p className="text-xs text-slate-400">{selectedFurniture.rotationDeg}° rotation</p>
           <p className="text-[10px] text-slate-600 mt-1">Drag · R rotate · Del remove</p>
         </div>
@@ -138,8 +138,8 @@ export function InfoPanel() {
                   <button
                     type="button"
                     onClick={() => select({ kind: 'room', id: r.id })}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${isSel ? 'ring-1 ring-indigo-500/50' : 'hover:bg-white/5'}`}
-                    style={{ background: isSel ? 'rgba(37,99,235,0.12)' : 'rgba(255,255,255,0.04)' }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${isSel ? 'ring-1 ring-zinc-500/60' : 'hover:bg-white/5'}`}
+                    style={{ background: isSel ? 'rgba(113,113,122,0.12)' : 'rgba(255,255,255,0.04)' }}
                   >
                     <span className="h-2 w-2 flex-none rounded-full" style={{ background: roomTypeColor(r.type) }} />
                     <span className="flex-1 truncate text-xs text-slate-300">{r.name}</span>

@@ -15,6 +15,7 @@
   "dependencies": {
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.17.14",
+    "@react-three/gpu-pathtracer": "^0.3.2",
     "@react-three/postprocessing": "^2.19.1",
     "jspdf": "^4.2.1",
     "konva": "^10.3.0",
@@ -22,6 +23,7 @@
     "react-dom": "^18.3.1",
     "react-konva": "^18.2.16",
     "three": "^0.169.0",
+    "three-mesh-bvh": "^0.7.8",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

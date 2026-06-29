@@ -45,7 +45,7 @@ function LeftSidebar() {
             title={t.label}
             className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[9px] font-semibold uppercase tracking-wider transition-colors ${
               tab === t.id
-                ? 'border-b-2 border-indigo-400 text-indigo-400'
+                ? 'border-b-2 border-zinc-300 text-zinc-300'
                 : 'border-b-2 border-transparent text-slate-500 hover:text-slate-300'
             }`}
           >
@@ -111,18 +111,18 @@ function AppShell() {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <header
         className="flex flex-none items-center gap-3 px-4 py-2.5"
-        style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)', borderBottom: '1px solid rgba(99,102,241,0.2)' }}
+        style={{ background: 'linear-gradient(135deg, #0a0a0a 0%, #1c1c1f 50%, #0a0a0a 100%)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
       >
         {/* Logo */}
         <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500 shadow-lg shadow-indigo-500/30">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-700 shadow-lg shadow-black/40">
             <svg viewBox="0 0 20 20" fill="white" className="h-4 w-4">
               <path d="M10.707 2.293a1 1 0 0 0-1.414 0l-7 7a1 1 0 0 0 1.414 1.414L4 10.414V17a1 1 0 0 0 1 1h4v-4h2v4h4a1 1 0 0 0 1-1v-6.586l.293.293a1 1 0 0 0 1.414-1.414l-7-7z"/>
             </svg>
           </div>
           <div>
             <h1 className="text-sm font-bold text-white leading-none">HomeMaker</h1>
-            <p className="text-[10px] text-indigo-300 leading-none mt-0.5">2D → 3D Floor Plan Editor</p>
+            <p className="text-[10px] text-zinc-400 leading-none mt-0.5">2D → 3D Floor Plan Editor</p>
           </div>
         </div>
 
@@ -155,7 +155,7 @@ function AppShell() {
                 onClick={() => setView(v)}
                 className={`rounded-md px-3 py-1 transition-all ${
                   view === v
-                    ? 'bg-indigo-600 text-white shadow shadow-indigo-500/30'
+                    ? 'bg-zinc-700 text-white shadow shadow-black/40'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >

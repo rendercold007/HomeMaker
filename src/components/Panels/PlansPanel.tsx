@@ -48,20 +48,20 @@ export function PlansPanel() {
                   onClick={() => { const p = loadPlan(meta.id); if (p) reset(p); }}
                   className={`group w-full rounded-xl border px-3 py-2.5 text-left transition-all ${
                     isActive
-                      ? 'border-indigo-500/40 bg-indigo-600/10'
+                      ? 'border-zinc-500/50 bg-zinc-700/30'
                       : 'border-white/5 bg-white/3 hover:border-white/10 hover:bg-white/5'
                   }`}
                   style={!isActive ? { background: 'rgba(255,255,255,0.03)' } : {}}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className={`truncate text-xs font-semibold ${isActive ? 'text-indigo-300' : 'text-slate-300'}`}>
+                      <p className={`truncate text-xs font-semibold ${isActive ? 'text-zinc-400' : 'text-slate-300'}`}>
                         {meta.name}
                       </p>
                       <p className="mt-0.5 text-[10px] text-slate-600">{formatDate(meta.savedAt)}</p>
                     </div>
                     {isActive ? (
-                      <span className="flex-none rounded-full bg-indigo-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-400">Active</span>
+                      <span className="flex-none rounded-full bg-zinc-700/40 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-300">Active</span>
                     ) : (
                       <button
                         onClick={(e) => { e.stopPropagation(); deletePlan(meta.id); refresh(); }}

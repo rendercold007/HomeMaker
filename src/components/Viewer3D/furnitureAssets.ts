@@ -45,7 +45,26 @@ export interface AssetDef {
  *   double_bed: { yawDeg: 180 },   // model faces the wrong way
  *   mirror: { keepModelY: true },  // wall-mounted, keep its own height
  */
-const ASSET_OVERRIDES: Readonly<Record<string, Omit<AssetDef, 'url'>>> = {};
+const ASSET_OVERRIDES: Readonly<Record<string, Omit<AssetDef, 'url'>>> = {
+  // Wall-mounted fixtures: their source origin already sits at mounting height,
+  // so don't drop them to the floor. (Harmless until a matching .glb exists.)
+  mirror: { keepModelY: true },
+  towel_rail: { keepModelY: true },
+  geyser: { keepModelY: true },
+};
+
+/**
+ * Types whose `.glb` is present on disk but deliberately NOT wired up, so they
+ * render with the procedural mesh instead. Use when a sourced model can't be
+ * salvaged by an override.
+ *
+ * - kitchen_counter: the file is a full kitchen run (≈5.5 m wide × 2.9 m tall,
+ *   with upper wall cabinets baked in), not a single counter segment. Auto-fit
+ *   to the 180×60 footprint squashes it into an unrecognisable thin slab, and no
+ *   scale can fix the 2.9 m cabinet height. Re-source a single base-counter
+ *   model, then remove it from this set.
+ */
+const EXCLUDED_TYPES: ReadonlySet<string> = new Set(['kitchen_counter']);
 
 // Vite bundles every matching file and hands back its hashed URL. Eager so the
 // manifest is a plain object at module load. Only files that exist are included.
@@ -64,7 +83,7 @@ function buildManifest(): Record<string, AssetDef> {
   const out: Record<string, AssetDef> = {};
   for (const [path, url] of Object.entries(MODEL_URLS)) {
     const type = typeFromPath(path);
-    if (type) out[type] = { url, ...ASSET_OVERRIDES[type] };
+    if (type && !EXCLUDED_TYPES.has(type)) out[type] = { url, ...ASSET_OVERRIDES[type] };
   }
   return out;
 }
